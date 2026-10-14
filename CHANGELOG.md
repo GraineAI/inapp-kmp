@@ -1,3 +1,18 @@
+## 0.8.0
+
+- **Booking a call, drawn by the SDK.** `Graine.presentBooking(reason)` (and `GraineAgent.presentBooking`), a
+  suspending call: the native SDK's own booking sheet — a sheet on a phone, a centred panel on a tablet — in the
+  agent's design, with the day, the time (each platform's own time picker), the phone's time zone, "What's it about?
+  (optional)" and Book call. It returns the booked call once the sheet closes, or null when the user closed it
+  without booking; refusals stay in the sheet as one line. Android shows it over the activity in front (null when
+  there is none); iOS over the key window's top view controller (the iOS SDK's `presentBookingWithReason:completion:`).
+- **`bookingAvailable`**, on each agent and on `Graine`: the native SDK's own rule — Graine rings this phone, the
+  agent lets users book, and the user is identified. Show your own "Call me" button only then.
+- The native chat windows (`GraineChat()` in `inapp-kmp-compose`, `GraineViews.chat()`) offer **Book a call** in
+  their Upcoming calls card by the same rule.
+- On iOS the sheet is GraineInApp's, so the app links GraineInApp of this version. With one from before the
+  sheet (0.7.0), `bookingAvailable` is false and `presentBooking` fails with `Unavailable` — the app keeps running.
+
 ## 0.7.0
 
 The first release: the Graine in-app agent for Kotlin Multiplatform, on Android and iOS, from shared code.

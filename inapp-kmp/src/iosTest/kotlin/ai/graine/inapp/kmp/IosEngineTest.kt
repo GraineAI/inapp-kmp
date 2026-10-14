@@ -54,6 +54,13 @@ class IosEngineTest {
         }
     }
 
+    @Test
+    fun bookingIsTheIosSdksAnswerReadThroughItsSelector() {
+        // No session (the host never resolves) and so no ringing: the iOS SDK says no, through the selector the
+        // engine checks first (a GraineInApp from before the booking sheet answers false the same way).
+        assertFalse(engine.bookingAvailable)
+    }
+
     /** The facade answers on the main queue: run the main loop until [done], at most [seconds]. */
     private fun spinUntil(seconds: Int = 15, done: () -> Boolean) {
         val start = TimeSource.Monotonic.markNow()

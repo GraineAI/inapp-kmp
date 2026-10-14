@@ -152,6 +152,12 @@ object Graine {
     /** Call off one of the default agent's booked calls. Returns its status afterwards: cancelled. */
     suspend fun cancelScheduledCall(id: String): GraineCallStatus = defaultAgent.cancelScheduledCall(id)
 
+    /** Whether the default agent can be booked from the app now. See [GraineAgent.bookingAvailable]. */
+    val bookingAvailable: Boolean get() = defaultAgent.bookingAvailable
+
+    /** The SDK's own booking sheet, for the default agent. See [GraineAgent.presentBooking]. */
+    suspend fun presentBooking(reason: String? = null): GraineScheduledCall? = defaultAgent.presentBooking(reason)
+
     // ── what the app has once: who, and what is on the screen ─────────────
 
     /**

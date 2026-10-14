@@ -18,8 +18,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.7.0")
-            implementation("ai.graine:inapp-kmp-compose:0.7.0")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.8.0")
+            implementation("ai.graine:inapp-kmp-compose:0.8.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -67,14 +67,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.7.0`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.8.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.7.0'`
-  (or `pod 'GraineInApp', '~> 0.7'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.7.0"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.8.0'`
+  (or `pod 'GraineInApp', '~> 0.8.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.8.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -90,6 +90,37 @@ Audio* and *Voice over IP*:
 
 At every launch (iOS wakes a closed app for a VoIP push and hands it over once
 this has run): `Graine.calls.enableVoIPPushes()`.
+
+### From source
+
+To build your app against this repository instead of Maven Central (a version
+not on Maven Central yet, or a fix not released): clone it beside your project,
+and the Android SDK of the same version beside it as `android` — the Android
+side builds on it. From your project's root:
+
+```bash
+git clone --branch 0.8.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.8.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+```
+
+then include the build in your app's `settings.gradle.kts`, in place of the
+published artifacts:
+
+```kotlin
+includeBuild("../graine-sdk/kmp") {
+    dependencySubstitution {
+        substitute(module("ai.graine:inapp-kmp")).using(project(":inapp-kmp"))
+        substitute(module("ai.graine:inapp-kmp-compose")).using(project(":inapp-kmp-compose"))
+    }
+}
+```
+
+Your build then compiles the library with the Gradle plugins your build
+declares: use the versions this repository's `build.gradle.kts` names (Kotlin
+2.1.20, Android Gradle plugin 8.13.2, Compose Multiplatform 1.8.2). Run Gradle
+on JDK 17 or newer, with `ANDROID_HOME` set to the Android SDK — the included
+builds do not read your app's `local.properties`. The iOS app links GraineInApp
+as above.
 
 ## Start
 
@@ -269,6 +300,42 @@ val status: GraineCallStatus = Graine.cancelScheduledCall(call.id)   // Cancelle
 `Unknown(raw)`), `source` (`Agent`, `App`, `Dashboard`, `Api`), `reason`,
 `isUpcoming` and `canCancel`.
 
+## Booking a call from your app
+
+When your workspace has Graine ring its users and the agent lets them book
+(Calls & scheduling, in the dashboard), the native SDK draws the booking screen
+itself — "Call me at…" with no screen of your own, from shared code:
+
+```kotlin
+if (Graine.bookingAvailable) {                         // rung here, booking on, the user identified
+    val call: GraineScheduledCall? = Graine.presentBooking(reason = "Card replacement")
+    if (call != null) showBooked(call)                 // null: closed without booking
+}
+```
+
+The sheet is drawn in the agent's design, light or dark: the day (chips from
+today to the furthest day the agent allows), the time on each platform's own
+time picker (only times the agent's rules allow), the phone's time zone,
+"What's it about? (optional)" — 120 characters, kept with the call for the
+agent, never in the push; `reason` fills it — and **Book call**. A refusal stays
+in the sheet as one line ("Pick a time at least 5 minutes from now", "That time
+is outside the hours we can call — pick another", "Sign in to book a call",
+"Couldn't book just now — try again", …); once it is booked, the sheet says when
+the agent will call. A sheet on a phone, a centred panel on a tablet. On Android
+it opens over the activity in front (`presentBooking` returns null when no
+activity is in front); on iOS over the key window's top view controller.
+
+On iOS the sheet is GraineInApp's: link GraineInApp of this library's version
+(with an older one, `bookingAvailable` is false and `presentBooking` fails with
+`Unavailable`).
+
+`bookingAvailable` is each agent's own (`Graine.agent("sales")?.bookingAvailable`)
+and is the native SDK's rule, read as it is now: true only when Graine rings
+this phone, the agent lets users book, and the user is identified with the
+trait the agent's Identity setting names. The native chat windows
+(`GraineChat()`, `GraineViews.chat()`) show **Book a call** in their Upcoming
+calls card by the same rule.
+
 ## Errors
 
 Every refusal is a `GraineException`: `code` (`InvalidKey`, `OriginRefused`,
@@ -314,16 +381,23 @@ agent's.
 
 ## Tests
 
+On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
+SDKs of the same version cloned beside this folder as `android` and `ios`:
+
 ```bash
-./gradlew :inapp-kmp:testDebugUnitTest            # the shared tests and the Android side, on the JVM
-./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="-L<dir> -lGraineInApp -L/usr/lib/swift -rpath /usr/lib/swift" -Pgraine.simulator=<device>
+git clone --branch 0.8.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.8.0 https://github.com/GraineAI/inapp-ios ../ios
+./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
+opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
+./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>
+node scripts/check-objc-header.mjs                        # the header Kotlin binds against GraineInApp's facade
 ```
 
-The iOS tests run against the iOS SDK itself, so the test binary links it:
-build GraineInApp for the simulator as a static library (`libGraineInApp.a`
-in `<dir>`) and pass the options that link it. `-Pgraine.kmp.ios=false` builds
-the Android side alone. The conversation vectors every Graine SDK is tested
-against are in `inapp-kmp/src/commonTest/contract/history.json`.
+The iOS tests run against the iOS SDK itself, so the test binary links it;
+`<device>` is a simulator's name or id (`xcrun simctl list devices available`).
+`-Pgraine.kmp.ios=false` builds the Android side alone. The conversation
+vectors every Graine SDK is tested against are in
+`inapp-kmp/src/commonTest/contract/history.json`.
 
 ## License
 

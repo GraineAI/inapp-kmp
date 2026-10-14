@@ -105,6 +105,13 @@ class AndroidEngineTest {
         override fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>) { scheduleArgs = at to reason; scheduleDone = done }
         override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) { listDone = done }
         override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) { did += "cancel:$id"; cancelDone = done }
+        override var bookingAvailable = false
+        var bookingFrom: Activity? = null
+        var bookingReason: String? = null
+        var bookingDone: GraineCallback<NativeScheduledCall?>? = null
+        override fun presentBooking(activity: Activity, reason: String?, done: GraineCallback<NativeScheduledCall?>) {
+            bookingFrom = activity; bookingReason = reason; bookingDone = done
+        }
 
         override var chatTurns: List<NativeChatTurn> = emptyList()
         override var chatConnected = false
@@ -289,6 +296,36 @@ class AndroidEngineTest {
         assertEquals(ActionResult.ok("Done.", mapOf("n" to 1)), AndroidMapping.result(GraineActionResult.ok("Done.", mapOf("n" to 1))))
         assertEquals(ActionResult(ActionResult.Status.ERROR, "Broke."), AndroidMapping.result(GraineActionResult.error("Broke.")))
         assertEquals(GraineActionResult.error("x"), AndroidMapping.result(ActionResult.error("x")))
+    }
+
+    // ── the booking sheet ─────────────────────────────────────────────────
+
+    @Test
+    fun theBookingSheetIsTheAndroidSdksOverTheActivityInFront() {
+        start()
+        assertFalse(engine.bookingAvailable)
+        port.bookingAvailable = true
+        assertTrue("the Android SDK's own answer, read as it is now", engine.bookingAvailable)
+
+        var heard: Result<GraineScheduledCall?>? = null
+        engine.presentBooking("Card replacement") { heard = it }
+        assertNull("no activity in front: nothing to show it over, so nothing is booked", heard!!.getOrThrow())
+        assertNull(port.bookingDone)
+
+        val activity = Activity()
+        front = activity
+        heard = null
+        engine.presentBooking("Card replacement") { heard = it }
+        assertTrue(port.bookingFrom === activity)
+        assertEquals("Card replacement", port.bookingReason)
+        assertNull("open until the user closes it", heard)
+        val at = Instant.parse("2026-10-15T12:30:00Z")
+        port.bookingDone!!.onResult(NativeScheduledCall("sc_2", Date(at.toEpochMilliseconds()), NativeCallStatus.SCHEDULED, NativeCallSource.APP, "Card replacement"), null)
+        assertEquals(GraineScheduledCall("sc_2", at, GraineCallStatus.Scheduled, GraineCallSource.App, "Card replacement"), heard!!.getOrThrow())
+
+        engine.presentBooking(null) { heard = it }
+        port.bookingDone!!.onResult(null, null)
+        assertNull("closed without booking", heard!!.getOrThrow())
     }
 
     // ── scheduling ────────────────────────────────────────────────────────

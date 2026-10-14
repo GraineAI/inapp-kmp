@@ -82,6 +82,19 @@ class MultiAgentTest {
     }
 
     @Test
+    fun eachAgentSaysWhetherItCanBeBookedAndShowsItsOwnSheet() = runTest {
+        val s = Graine.agent("support")!!
+        support.bookingAvailable = true
+        assertTrue(s.bookingAvailable)
+        assertFalse(Graine.bookingAvailable, "the default agent answers for itself")
+        val call = GraineScheduledCall("sc_9", Instant.fromEpochMilliseconds(1_800_000_000_000), GraineCallStatus.Scheduled, GraineCallSource.App, null)
+        support.bookingAnswer = Result.success(call)
+        assertEquals(call, s.presentBooking())
+        assertEquals(listOf<String?>(null), support.presented)
+        assertTrue(main.presented.isEmpty())
+    }
+
+    @Test
     fun whoTheUserIsAndTheScreenAreToldOnceForEveryAgent() {
         Graine.identify(mapOf("user_id" to "u-1"), memory = true)
         Graine.setMemory(false)

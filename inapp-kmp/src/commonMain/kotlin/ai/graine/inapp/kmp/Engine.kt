@@ -48,6 +48,11 @@ internal interface GraineEngine {
     fun scheduledCalls(done: (Result<List<GraineScheduledCall>>) -> Unit)
     fun cancelScheduledCall(id: String, done: (Result<GraineCallStatus>) -> Unit)
 
+    /** Whether this agent can be booked from the app now: the native SDK's own rule (BOOKING-SHEET.md §1). */
+    val bookingAvailable: Boolean
+    /** The native SDK's booking sheet: answers the booked call once it closes, or null when nothing was booked. */
+    fun presentBooking(reason: String?, done: (Result<GraineScheduledCall?>) -> Unit)
+
     fun chatOpen(size: GraineChatSize?)
     fun chatClose()
     fun chatSend(text: String)

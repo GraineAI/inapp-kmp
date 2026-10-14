@@ -115,6 +115,21 @@ internal class AndroidEngine(
         else done(Result.success(status?.let { AndroidMapping.callStatus(it) } ?: GraineCallStatus.Cancelled))
     }
 
+    override val bookingAvailable: Boolean get() = port.bookingAvailable
+
+    /** The Android SDK's booking sheet, over the activity in front; none in front, nothing to show it over: null. */
+    override fun presentBooking(reason: String?, done: (Result<GraineScheduledCall?>) -> Unit) = onMain {
+        val activity = frontActivity()
+        if (activity == null) {
+            done(Result.success(null))
+            return@onMain
+        }
+        port.presentBooking(activity, reason) { call, error ->
+            if (error != null) done(Result.failure(AndroidMapping.error(error)))
+            else done(Result.success(call?.let { AndroidMapping.scheduledCall(it) }))
+        }
+    }
+
     // ── the chat ──────────────────────────────────────────────────────────
 
     override fun chatOpen(size: GraineChatSize?) = onMain { port.chatOpen(size?.let { AndroidMapping.chatSize(it) }) }

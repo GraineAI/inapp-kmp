@@ -51,6 +51,9 @@ internal interface AndroidPort {
     fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>)
     fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>)
     fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>)
+    val bookingAvailable: Boolean
+    /** The booking sheet over [activity]: the booked call once it closes, or null. */
+    fun presentBooking(activity: Activity, reason: String?, done: GraineCallback<NativeScheduledCall?>)
 
     // The agent's chat (GraineInApp.chat).
     val chatTurns: List<NativeChatTurn>
@@ -120,6 +123,9 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>) = g.scheduleCall(at, reason, done)
     override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) = g.scheduledCalls(done)
     override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) = g.cancelScheduledCall(id, done)
+    override val bookingAvailable: Boolean get() = g.bookingAvailable
+    override fun presentBooking(activity: Activity, reason: String?, done: GraineCallback<NativeScheduledCall?>) =
+        g.presentBooking(activity, reason, done)
 
     override val chatTurns: List<NativeChatTurn> get() = g.chat.messages
     override val chatConnected: Boolean get() = g.chat.connected

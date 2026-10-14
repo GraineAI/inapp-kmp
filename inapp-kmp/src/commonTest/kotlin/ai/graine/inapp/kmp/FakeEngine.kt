@@ -78,6 +78,16 @@ internal class FakeEngine : GraineEngine {
     override fun scheduledCalls(done: (Result<List<GraineScheduledCall>>) -> Unit) { calls += "scheduledCalls"; listAnswer?.let(done) }
     override fun cancelScheduledCall(id: String, done: (Result<GraineCallStatus>) -> Unit) { calls += "cancel:$id"; cancelAnswer?.let(done) }
 
+    override var bookingAvailable: Boolean = false
+    /** What the booking sheet answers once it closes; null leaves it open. */
+    var bookingAnswer: Result<GraineScheduledCall?>? = Result.success(null)
+    val presented = mutableListOf<String?>()
+    override fun presentBooking(reason: String?, done: (Result<GraineScheduledCall?>) -> Unit) {
+        presented += reason
+        calls += "presentBooking"
+        bookingAnswer?.let(done)
+    }
+
     override fun chatOpen(size: GraineChatSize?) { calls += if (size == null) "chatOpen" else "chatOpen:${size.wire}" }
     override fun chatClose() { calls += "chatClose" }
     override fun chatSend(text: String) { calls += "chatSend:$text" }

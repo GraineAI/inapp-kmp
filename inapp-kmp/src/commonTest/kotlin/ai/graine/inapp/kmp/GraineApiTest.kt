@@ -66,6 +66,42 @@ class GraineApiTest {
         assertEquals("3f2504e0-4f89-11d3-9a0c-0305e82c3301", Graine.installId)
     }
 
+    // ── the booking sheet ────────────────────────────────────────────────
+
+    @Test
+    fun bookingAvailableIsTheNativeSdksAnswerAndFalseBeforeConfigure() {
+        assertFalse(Graine.bookingAvailable, "nothing configured: nothing can be booked")
+        configured()
+        assertFalse(Graine.bookingAvailable)
+        engine.bookingAvailable = true
+        assertTrue(Graine.bookingAvailable, "read as it is now, never cached")
+        engine.bookingAvailable = false
+        assertFalse(Graine.bookingAvailable)
+    }
+
+    @Test
+    fun theSheetReturnsTheBookedCallOrNullWhenClosed() = runTest {
+        configured()
+        assertNull(Graine.presentBooking(), "closed without booking")
+        val call = GraineScheduledCall("sc_1", Instant.fromEpochMilliseconds(1_800_000_000_000), GraineCallStatus.Scheduled, GraineCallSource.App, "Card replacement")
+        engine.bookingAnswer = Result.success(call)
+        assertEquals(call, Graine.presentBooking("Card replacement"))
+        assertEquals(listOf<String?>(null, "Card replacement"), engine.presented)
+        // The sheet stays open until the user closes it: the call waits for it.
+        engine.bookingAnswer = null
+        val waiting = async { Graine.presentBooking() }
+        runCurrent()
+        assertFalse(waiting.isCompleted)
+        waiting.cancel()
+        engine.bookingAnswer = Result.failure(GraineException(GraineErrorCode.Unavailable, "No screen to show it on."))
+        assertEquals(GraineErrorCode.Unavailable, assertFailsWith<GraineException> { Graine.presentBooking() }.code)
+    }
+
+    @Test
+    fun theSheetNeedsAConfiguredAgent() = runTest {
+        assertFailsWith<IllegalStateException> { Graine.presentBooking() }
+    }
+
     // ── identity and memory ───────────────────────────────────────────────
 
     @Test
@@ -435,7 +471,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.7.0", GraineKmpVersion.NAME)
+        assertEquals("0.8.0", GraineKmpVersion.NAME)
     }
 
     @Test

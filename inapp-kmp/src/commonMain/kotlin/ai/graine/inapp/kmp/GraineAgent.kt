@@ -156,6 +156,28 @@ class GraineAgent internal constructor(
     /** The calls this agent has booked for the signed-in user (or this install) that are still to come, soonest first. */
     suspend fun scheduledCalls(): List<GraineScheduledCall> = await { e, done -> e.scheduledCalls(done) }
 
+    /**
+     * Whether this agent can be booked from the app now — what the SDK's own
+     * "Book a call" follows, and what your own button should: Graine rings
+     * this phone (the workspace's In-app calling, for this platform), the
+     * agent lets users book, and the user is identified with the trait the
+     * agent's Identity setting names. The native SDK's rule, read as it is
+     * now; false before configure(). Read it again after `identify` and once
+     * the session has loaded.
+     */
+    val bookingAvailable: Boolean get() = current?.bookingAvailable ?: false
+
+    /**
+     * Show the SDK's own booking sheet, drawn by the native SDK in this
+     * agent's design: the day, the time, the phone's time zone, "What's it
+     * about? (optional)" — which [reason] fills — and Book call. Returns the
+     * booked call once the sheet closes, or null when the user closed it
+     * without booking; a refusal stays in the sheet as one line. Android: over
+     * the activity in front (null when there is none); iOS: over the key
+     * window's top view controller. Check [bookingAvailable] before offering it.
+     */
+    suspend fun presentBooking(reason: String? = null): GraineScheduledCall? = await { e, done -> e.presentBooking(reason, done) }
+
     /** Call one off — only one booked for this user or install. Returns its status afterwards: cancelled. `not_found` for any other. */
     suspend fun cancelScheduledCall(id: String): GraineCallStatus {
         if (id.isBlank()) throw GraineException(GraineErrorCode.InvalidRequest, "No call id.")

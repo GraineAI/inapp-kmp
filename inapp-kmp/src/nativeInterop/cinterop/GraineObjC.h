@@ -11,6 +11,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)unregister;
 @end
 
+@interface GraineObjCScheduledCall : NSObject
+@property (nonatomic, readonly) NSString *identifier;
+@property (nonatomic, readonly, nullable) NSDate *at;
+@property (nonatomic, readonly) NSString *status;
+@property (nonatomic, readonly, nullable) NSString *source;
+@property (nonatomic, readonly, nullable) NSString *reason;
+@end
+
 @interface GraineObjCChat : NSObject
 @property (nonatomic, readonly) NSString *snapshotJSON;
 - (void)open;
@@ -62,6 +70,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) GraineObjCChat *chat;
 @property (nonatomic, readonly) GraineObjCCalls *calls;
 @property (nonatomic, readonly) GraineObjCVoice *voice;
+@property (nonatomic, readonly) BOOL bookingAvailable;
 
 - (void)identifyJSON:(nullable NSString *)traitsJSON;
 - (void)identifyJSON:(nullable NSString *)traitsJSON memory:(BOOL)memory;
@@ -80,6 +89,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)scheduleCallJSONAt:(NSDate *)at reason:(nullable NSString *)reason completion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (void)scheduledCallsJSONWithCompletion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (void)cancelScheduledCall:(NSString *)callId completion:(void (^)(NSString * _Nullable status, NSError * _Nullable error))completion;
+- (void)presentBookingWithReason:(nullable NSString *)reason completion:(void (^)(GraineObjCScheduledCall * _Nullable call))completion;
 - (GraineObjCRegistration *)observeEvents:(void (^)(NSString *name, NSString *json))observer;
 - (NSObject *)chatViewControllerWithOnClose:(void (^ _Nullable)(void))onClose;
 - (NSObject *)callViewController;

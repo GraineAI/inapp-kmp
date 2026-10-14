@@ -2,10 +2,13 @@ package ai.graine.inapp.kmp
 
 import ai.graine.inapp.kmp.objc.GraineObjC
 import ai.graine.inapp.kmp.objc.GraineObjCRegistration
+import ai.graine.inapp.kmp.objc.GraineObjCScheduledCall
 import kotlinx.datetime.Instant
+import kotlinx.datetime.toKotlinInstant
 import kotlinx.datetime.toNSDate
 import platform.Foundation.NSError
 import platform.Foundation.NSNumber
+import platform.Foundation.NSSelectorFromString
 
 /**
  * THE SHARED API ON iOS — every call delegated to the iOS SDK through its
@@ -105,6 +108,24 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         if (error != null) done(Result.failure(failure(error))) else done(Result.success(GraineCallStatus.from(status ?: "cancelled")))
     }
 
+    /**
+     * The iOS SDK's own rule, read as it is now. A GraineInApp from before the booking sheet (0.7.0) has no
+     * such selector, and an unknown selector would stop the app: it answers false instead.
+     */
+    override val bookingAvailable: Boolean get() = facade.respondsToSelector(BOOKING_AVAILABLE) && facade.bookingAvailable
+
+    /**
+     * The iOS SDK's booking sheet, over the key window's top view controller (the facade's
+     * `presentBookingWithReason:completion:`). With a GraineInApp from before the sheet: `Unavailable`.
+     */
+    override fun presentBooking(reason: String?, done: (Result<GraineScheduledCall?>) -> Unit) {
+        if (!facade.respondsToSelector(PRESENT_BOOKING)) {
+            done(Result.failure(GraineException(GraineErrorCode.Unavailable, OLD_IOS_SDK)))
+            return
+        }
+        facade.presentBookingWithReason(reason) { call -> done(Result.success(call?.let { scheduled(it) })) }
+    }
+
     // ── the chat ──────────────────────────────────────────────────────────
 
     // Without a size, the plain open: what every facade answers.
@@ -152,6 +173,21 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     private fun publishVoice() = sink.voice(Bridge.voice(facade.voice.snapshotJSON))
 
     companion object {
+        // The booking sheet's selectors, new in the facade after 0.7.0 (asked for before each use).
+        private val BOOKING_AVAILABLE = NSSelectorFromString("bookingAvailable")
+        private val PRESENT_BOOKING = NSSelectorFromString("presentBookingWithReason:completion:")
+        private val OLD_IOS_SDK =
+            "This app links a GraineInApp without the booking sheet. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
+
+        /** A call the facade hands over as its object, in the shared type. */
+        internal fun scheduled(c: GraineObjCScheduledCall): GraineScheduledCall = GraineScheduledCall(
+            id = c.identifier,
+            at = c.at?.toKotlinInstant(),
+            status = GraineCallStatus.from(c.status),
+            source = GraineCallSource.from(c.source),
+            reason = c.reason,
+        )
+
         /** The facade's NSError: its code word in `userInfo["code"]`, its sentence as the description, a rate limit's wait in `userInfo["retryAfterSeconds"]`. */
         internal fun failure(error: NSError): GraineException =
             Bridge.error(error.userInfo["code"] as? String, error.localizedDescription, whole(error.userInfo["retryAfterSeconds"]))
