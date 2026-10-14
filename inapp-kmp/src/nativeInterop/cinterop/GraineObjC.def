@@ -1,0 +1,5 @@
+# The iOS SDK's Objective-C facade, as the iOS side of this library calls it.
+# Only the header is read here; the app links the iOS SDK itself (README → iOS).
+language = Objective-C
+headers = GraineObjC.h
+headerFilter = GraineObjC.h

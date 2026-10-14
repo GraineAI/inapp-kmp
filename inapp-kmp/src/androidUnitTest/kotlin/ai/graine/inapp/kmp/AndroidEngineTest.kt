@@ -1,0 +1,640 @@
+package ai.graine.inapp.kmp
+
+import ai.graine.inapp.ActionResult
+import ai.graine.inapp.FrictionSignal
+import ai.graine.inapp.GraineCall
+import ai.graine.inapp.GraineCallListener
+import ai.graine.inapp.GraineCallOutcome as NativeOutcome
+import ai.graine.inapp.GraineCallSource as NativeCallSource
+import ai.graine.inapp.GraineCallState as NativeCallState
+import ai.graine.inapp.GraineCallStatus as NativeCallStatus
+import ai.graine.inapp.GraineCallback
+import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
+import ai.graine.inapp.GraineChatSize as NativeChatSize
+import ai.graine.inapp.GraineChatTurn as NativeChatTurn
+import ai.graine.inapp.GraineError
+import ai.graine.inapp.GraineErrorCode as NativeErrorCode
+import ai.graine.inapp.GraineField as NativeField
+import ai.graine.inapp.GraineListener
+import ai.graine.inapp.GraineMemory as NativeMemory
+import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
+import ai.graine.inapp.GraineSchedulingRules as NativeRules
+import ai.graine.inapp.GraineScreen as NativeScreen
+import ai.graine.inapp.GraineWidget
+import ai.graine.inapp.Role
+import ai.graine.inapp.SessionConfig
+import ai.graine.inapp.SessionIdentity
+import ai.graine.inapp.Transport
+import android.app.Activity
+import kotlinx.datetime.Instant
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import java.util.Date
+
+/**
+ * The shared API on Android, run over the Android SDK's real types: its
+ * listeners, sessions, calls, errors and chat turns, as the SDK reports them —
+ * through a fake port standing where one agent's GraineInApp stands.
+ */
+class AndroidEngineTest {
+
+    private class Heard : EngineSink {
+        val sessions = mutableListOf<GraineSession>()
+        val failures = mutableListOf<String>()
+        val events = mutableListOf<GraineEvent>()
+        var chat: Triple<List<GraineChatTurn>, GraineChatStatus, Boolean>? = null
+        var calls: GraineCallInfo? = null
+        val outcomes = mutableListOf<GraineCallOutcome>()
+        val incoming = mutableListOf<GraineIncomingCall>()
+        var voice: GraineVoiceInfo? = null
+        override fun session(session: GraineSession) { sessions += session }
+        override fun sessionFailed(message: String) { failures += message }
+        override fun event(event: GraineEvent) { events += event }
+        override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) { chat = Triple(turns, status, typing) }
+        override fun calls(info: GraineCallInfo) { calls = info }
+        override fun callOutcome(outcome: GraineCallOutcome) { outcomes += outcome }
+        override fun incomingCall(call: GraineIncomingCall) { incoming += call }
+        override fun voice(info: GraineVoiceInfo) { voice = info }
+    }
+
+    private class Port : AndroidPort {
+        val did = mutableListOf<String>()
+        val listeners = mutableListOf<GraineListener>()
+        val callListeners = mutableListOf<GraineCallListener>()
+        val chatListeners = mutableListOf<Runnable>()
+        var screens = mutableListOf<NativeScreen?>()
+        var fields = mutableListOf<NativeField>()
+        var actions = mutableMapOf<String, (JSONObject, (ActionResult) -> Unit) -> Unit>()
+        var forget: GraineCallback<Int>? = null
+        var memoriesDone: GraineCallback<List<NativeMemory>>? = null
+        var scheduleArgs: Pair<Date, String?>? = null
+        var scheduleDone: GraineCallback<NativeScheduledCall>? = null
+        var listDone: GraineCallback<List<NativeScheduledCall>>? = null
+        var cancelDone: GraineCallback<NativeCallStatus>? = null
+        var callsConfig: NativeCallsConfig? = null
+        var startedFrom: Activity? = null
+        var callBackArgs: Pair<String?, String?>? = null
+        var newConversationDone: GraineCallback<Unit>? = null
+
+        override val name = "help"
+        override var installId = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+        override var memoryEnabled = true
+        override var session: SessionConfig? = null
+        override fun addListener(listener: GraineListener) { listeners += listener }
+        override fun identify(traits: Map<String, Any?>?, memory: Boolean?) { did += "identify:$traits:$memory" }
+        override fun setMemory(enabled: Boolean) { did += "setMemory:$enabled" }
+        override fun forgetMemory(done: GraineCallback<Int>) { forget = done }
+        override fun memories(done: GraineCallback<List<NativeMemory>>) { memoriesDone = done }
+        override fun setVariables(values: Map<String, Any?>?) { did += "setVariables:$values" }
+        override fun setScreen(screen: NativeScreen?) { screens.add(screen) }
+        override fun updateField(field: NativeField) { fields.add(field) }
+        override fun removeField(name: String) { did += "removeField:$name" }
+        override fun clearScreen(screenId: String?) { did += "clearScreen:$screenId" }
+        override fun track(name: String, data: Map<String, Any?>) { did += "track:$name:$data" }
+        override fun tap(name: String) { did += "tap:$name" }
+        override fun noteInteraction() { did += "noteInteraction" }
+        override fun registerDeferredAction(name: String, handler: (args: JSONObject, answer: (ActionResult) -> Unit) -> Unit): () -> Unit {
+            actions[name] = handler
+            return { actions.remove(name) }
+        }
+        override fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>) { scheduleArgs = at to reason; scheduleDone = done }
+        override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) { listDone = done }
+        override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) { did += "cancel:$id"; cancelDone = done }
+
+        override var chatTurns: List<NativeChatTurn> = emptyList()
+        override var chatConnected = false
+        override var chatConnecting = false
+        override var chatFailed = false
+        override var chatTyping = false
+        override fun addChatChangeListener(listener: Runnable) { chatListeners += listener }
+        override fun chatOpen(size: NativeChatSize?) { did += "chatOpen:$size" }
+        override fun chatConnect() { did += "chatConnect" }
+        override fun chatClose() { did += "chatClose" }
+        override fun chatSend(text: String) { did += "chatSend:$text" }
+        override fun chatNewConversation(done: GraineCallback<Unit>) { did += "newConversation"; newConversationDone = done }
+        fun chatChanged() = chatListeners.forEach { it.run() }
+
+        override var callState = NativeCallState.IDLE
+        override var call: GraineCall? = null
+        var mutedNow = false
+        var speakerNow = false
+        override val callMuted: Boolean get() = mutedNow
+        override val callSpeaker: Boolean get() = speakerNow
+        override var callAgentSpeaking = false
+        override var callAgentName: String? = null
+        override fun addCallListener(listener: GraineCallListener) { callListeners += listener }
+        override fun configureCalls(config: NativeCallsConfig) { callsConfig = config }
+        override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? {
+            startedFrom = activity; did += "startCall:$reason:$variables"; return "call_9"
+        }
+        override fun callBack(activity: Activity, missedCallId: String?, reason: String?): String? { callBackArgs = missedCallId to reason; return "call_10" }
+        override fun answerCall() { did += "answer" }
+        override fun declineCall() { did += "decline" }
+        override fun endCall() { did += "endCall" }
+        override fun setCallMuted(muted: Boolean) { did += "callMuted:$muted" }
+        override fun setCallSpeaker(on: Boolean) { did += "speaker:$on" }
+
+        override var voiceConnected = false
+        override var voiceConnecting = false
+        var voiceMutedNow = false
+        override val voiceMuted: Boolean get() = voiceMutedNow
+        override fun attachVoice(activity: Activity) { did += "attachVoice" }
+        override fun startVoice() { did += "startVoice" }
+        override fun endVoice() { did += "endVoice" }
+        override fun setVoiceMuted(muted: Boolean) { voiceMutedNow = muted; did += "voiceMuted:$muted" }
+    }
+
+    private lateinit var port: Port
+    private lateinit var heard: Heard
+    private lateinit var engine: AndroidEngine
+    private var front: Activity? = null
+
+    @Before
+    fun setUp() {
+        port = Port()
+        heard = Heard()
+        front = null
+        engine = AndroidEngine(
+            port = port,
+            appName = { "Graine Demo" },
+            frontActivity = { front },
+            wallMs = { 1_760_000_000_000L },
+            ringtone = { null },
+            onMain = { it() },
+            onMainSync = { it() },
+        )
+    }
+
+    private fun start() = engine.start(heard)
+
+    private fun session(
+        rules: NativeRules = NativeRules(),
+        identity: SessionIdentity? = SessionIdentity("patient_id", 1),
+        memory: Boolean? = true,
+    ) = SessionConfig(
+        agentId = "agent-1", webcallAgentId = "web-1", appearance = JSONObject(), variables = emptyMap(), pageVersion = null,
+        declaredActions = setOf("open_screen", "mark_done"), identity = identity, memoryEnabled = memory, schedulingRules = rules,
+    )
+
+    // ── the session ───────────────────────────────────────────────────────
+
+    @Test
+    fun aSessionTheSdkAlreadyHasIsReportedAtStart() {
+        port.session = session(rules = NativeRules(true, 10, 7, 2, 45, "Asha · Graine Care", true, listOf("android")))
+        start()
+        val s = heard.sessions.single()
+        assertEquals("patient_id", s.identityField)
+        assertEquals(1, s.devicesPerUser)
+        assertEquals(true, s.memoryEnabled)
+        assertEquals(GraineSchedulingRules(true, 10, 7, 2, 45, "Asha · Graine Care", true, listOf(GrainePlatform.ANDROID)), s.schedulingRules)
+        assertEquals(setOf("open_screen", "mark_done"), s.declaredActions)
+    }
+
+    @Test
+    fun aSessionWithoutCallsAllowsNoBookingAndTheDefaults() {
+        start()
+        port.listeners.single().onSessionReady(session(identity = null, memory = null))
+        val s = heard.sessions.single()
+        assertEquals("user_id", s.identityField)
+        assertNull(s.memoryEnabled)
+        assertEquals(GraineSchedulingRules(), s.schedulingRules)
+    }
+
+    @Test
+    fun anErrorBeforeTheSessionIsTheSessionFailing() {
+        start()
+        port.listeners.single().onError("Publishable key was rejected.")
+        assertEquals(listOf("Publishable key was rejected."), heard.failures)
+        port.session = session()
+        port.listeners.single().onError("A later problem.")
+        assertEquals(1, heard.failures.size)
+        assertEquals(listOf(GraineEvent.Error("Publishable key was rejected."), GraineEvent.Error("A later problem.")), heard.events)
+    }
+
+    // ── identity, memory, the screen ──────────────────────────────────────
+
+    @Test
+    fun callsReachTheSdkAsItsOwnTypes() {
+        start()
+        engine.identify(mapOf("patient_id" to "MRN-1"), false)
+        engine.setMemory(true)
+        engine.setScreen(
+            GraineScreen(
+                "kyc", "Upload", GraineScreen.Journey("KYC", 2, 4, "review"),
+                listOf(GraineField("pan", "PAN", "ABCDE1234F", GraineFieldStatus.INVALID, "Not recognised", optional = true)),
+                "Banner", mapOf("attempts" to 2), listOf("open_screen"),
+            )
+        )
+        engine.setScreen(null)
+        engine.updateField(GraineField("otp", status = GraineFieldStatus.LOCKED))
+        val native = port.screens.first()!!
+        assertEquals("kyc", native.screen)
+        assertEquals(NativeScreen.Journey("KYC", 2, 4, "review"), native.journey)
+        assertEquals(NativeField("pan", "PAN", "ABCDE1234F", NativeField.Status.INVALID, "Not recognised", true), native.fields.single())
+        assertEquals("Banner", native.error)
+        assertEquals(mapOf("attempts" to 2), native.data)
+        assertEquals(listOf("open_screen"), native.availableActions)
+        assertNull(port.screens[1])
+        assertEquals(NativeField.Status.LOCKED, port.fields.single().status)
+        assertEquals(listOf("identify:{patient_id=MRN-1}:false", "setMemory:true"), port.did)
+    }
+
+    @Test
+    fun memoriesAndForgettingMapTypesAndErrors() {
+        start()
+        var memories: Result<List<GraineMemory>>? = null
+        engine.memories { memories = it }
+        port.memoriesDone!!.onResult(listOf(NativeMemory("m1", "Takes metformin", Date(1_000), null)), null)
+        assertEquals(listOf(GraineMemory("m1", "Takes metformin", Instant.fromEpochMilliseconds(1_000), null)), memories!!.getOrThrow())
+
+        engine.memories { memories = it }
+        port.memoriesDone!!.onResult(null, GraineError(NativeErrorCode.DEVICE_LIMIT, "Not one of theirs."))
+        val e = memories!!.exceptionOrNull() as GraineException
+        assertEquals(GraineErrorCode.DeviceLimit, e.code)
+        assertEquals("Not one of theirs.", e.message)
+
+        var forgot: Result<Int>? = null
+        engine.forgetMemory { forgot = it }
+        port.forget!!.onResult(3, null)
+        assertEquals("how many the Android SDK says were deleted", 3, forgot!!.getOrThrow())
+        engine.forgetMemory { forgot = it }
+        port.forget!!.onResult(null, GraineError(NativeErrorCode.Unknown("not_ready"), "The agent could not be loaded."))
+        assertEquals(GraineErrorCode.Unknown("not_ready"), (forgot!!.exceptionOrNull() as GraineException).code)
+        engine.forgetMemory { forgot = it }
+        port.forget!!.onResult(null, GraineError(NativeErrorCode.RATE_LIMITED, "Slow down.", retryAfterSeconds = 30))
+        val limited = forgot!!.exceptionOrNull() as GraineException
+        assertEquals(GraineErrorCode.RateLimited, limited.code)
+        assertEquals(30, limited.retryAfterSeconds)
+    }
+
+    // ── actions ───────────────────────────────────────────────────────────
+
+    @Test
+    fun anActionsArgumentsAndAnswerCrossAsPlainValues() {
+        start()
+        var args: Map<String, Any?>? = null
+        engine.registerAction("mark_done") { a, answer -> args = a; answer(GraineActionResult.refused("Which one?")) }
+        var answered: ActionResult? = null
+        port.actions.getValue("mark_done")(JSONObject("""{"item":"metformin","count":2,"ratio":0.5,"ok":true,"none":null,"tags":["a",1],"o":{"k":"v"}}""")) { answered = it }
+        assertEquals(
+            mapOf("item" to "metformin", "count" to 2L, "ratio" to 0.5, "ok" to true, "none" to null, "tags" to listOf("a", 1L), "o" to mapOf("k" to "v")),
+            args,
+        )
+        assertEquals(ActionResult(ActionResult.Status.REFUSED, "Which one?"), answered)
+        assertEquals(ActionResult.ok("Done.", mapOf("n" to 1)), AndroidMapping.result(GraineActionResult.ok("Done.", mapOf("n" to 1))))
+        assertEquals(ActionResult(ActionResult.Status.ERROR, "Broke."), AndroidMapping.result(GraineActionResult.error("Broke.")))
+        assertEquals(GraineActionResult.error("x"), AndroidMapping.result(ActionResult.error("x")))
+    }
+
+    // ── scheduling ────────────────────────────────────────────────────────
+
+    @Test
+    fun bookingsListsAndCancelsAreTheWireTypes() {
+        start()
+        var booked: Result<GraineScheduledCall>? = null
+        val at = Instant.parse("2026-10-14T12:30:00Z")
+        engine.scheduleCall(at, "Weekly check-in") { booked = it }
+        assertEquals(Date(at.toEpochMilliseconds()) to "Weekly check-in", port.scheduleArgs)
+        port.scheduleDone!!.onResult(NativeScheduledCall("sc_1", Date(at.toEpochMilliseconds()), NativeCallStatus.SCHEDULED, NativeCallSource.APP, "Weekly check-in"), null)
+        assertEquals(GraineScheduledCall("sc_1", at, GraineCallStatus.Scheduled, GraineCallSource.App, "Weekly check-in"), booked!!.getOrThrow())
+
+        engine.scheduleCall(at, null) { booked = it }
+        port.scheduleDone!!.onResult(null, GraineError(NativeErrorCode.OUTSIDE_WINDOW, "Outside calling hours."))
+        assertEquals(GraineErrorCode.OutsideWindow, (booked!!.exceptionOrNull() as GraineException).code)
+        engine.scheduleCall(at, null) { booked = it }
+        port.scheduleDone!!.onResult(null, null)
+        assertEquals(GraineErrorCode.Unavailable, (booked!!.exceptionOrNull() as GraineException).code)
+
+        var listed: Result<List<GraineScheduledCall>>? = null
+        engine.scheduledCalls { listed = it }
+        port.listDone!!.onResult(
+            listOf(
+                NativeScheduledCall("a", null, NativeCallStatus.NO_DEVICE, NativeCallSource.DASHBOARD),
+                NativeScheduledCall("b", null, NativeCallStatus.Unknown("snoozed")),
+            ),
+            null,
+        )
+        assertEquals(
+            listOf(GraineScheduledCall("a", null, GraineCallStatus.NoDevice, GraineCallSource.Dashboard), GraineScheduledCall("b", null, GraineCallStatus.Unknown("snoozed"))),
+            listed!!.getOrThrow(),
+        )
+
+        var cancelled: Result<GraineCallStatus>? = null
+        engine.cancelScheduledCall("a") { cancelled = it }
+        port.cancelDone!!.onResult(NativeCallStatus.CANCELLED, null)
+        assertEquals(GraineCallStatus.Cancelled, cancelled!!.getOrThrow())
+        engine.cancelScheduledCall("b") { cancelled = it }
+        port.cancelDone!!.onResult(NativeCallStatus.EXPIRED, null)
+        assertEquals("the server's word, passed on", GraineCallStatus.Expired, cancelled!!.getOrThrow())
+        engine.cancelScheduledCall("z") { cancelled = it }
+        port.cancelDone!!.onResult(null, GraineError(NativeErrorCode.NOT_FOUND, "No such call."))
+        assertEquals(GraineErrorCode.NotFound, (cancelled!!.exceptionOrNull() as GraineException).code)
+    }
+
+    // ── the chat ──────────────────────────────────────────────────────────
+
+    @Test
+    fun theChatsTurnsAreTheSdksAndItsFlagsAWord() {
+        start()
+        val card = GraineWidget.adopt(JSONObject("""{"widget_id":"w1","kind":"choices","data":{"title":"Pick one"}}"""), "https://www.graine.ai")
+        port.chatTurns = listOf(
+            NativeChatTurn("t1", Role.CUSTOMER, "Where is my order?", Date(1_000), NativeChatTurn.Delivery.SENDING),
+            NativeChatTurn("t2", Role.AGENT, "It ships to", Date(2_000), proactive = false, component = card, live = true),
+        )
+        port.chatConnecting = true
+        port.chatTyping = true
+        port.chatChanged()
+        val (turns, status, typing) = heard.chat!!
+        assertEquals(GraineChatStatus.CONNECTING, status)
+        assertTrue(typing)
+        assertEquals(listOf("t1", "t2"), turns.map { it.id })
+        assertEquals(listOf(GraineRole.USER, GraineRole.AGENT), turns.map { it.role })
+        assertEquals(listOf(GraineDelivery.SENDING, null), turns.map { it.delivery })
+        assertEquals(Instant.fromEpochMilliseconds(1_000), turns[0].at)
+        assertTrue(turns[1].live)
+        val component = turns[1].component!!
+        assertEquals("w1", component.id)
+        assertEquals("choices", component.kind)
+        assertEquals("Pick one", component.title)
+
+        port.chatConnecting = false; port.chatConnected = true; port.chatChanged()
+        assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
+        port.chatConnected = false; port.chatConnecting = true; port.listeners.single().onChatState(false, true)
+        assertEquals(GraineChatStatus.RECONNECTING, heard.chat!!.second)
+        port.chatConnecting = false; port.chatFailed = true; port.chatChanged()
+        assertEquals(GraineChatStatus.OFFLINE, heard.chat!!.second)
+    }
+
+    @Test
+    fun aFinishedAgentMessageIsAnEvent() {
+        start()
+        port.chatTurns = listOf(
+            NativeChatTurn("t1", Role.CUSTOMER, "Hi", Date(1_000)),
+            NativeChatTurn("t2", Role.AGENT, "Hello, I am Asha.", Date(2_000), proactive = false),
+        )
+        port.listeners.single().onChatMessage(Role.AGENT, "Hello", true)
+        port.listeners.single().onChatMessage(Role.CUSTOMER, "Hi", false)
+        assertTrue(heard.events.isEmpty())
+        port.listeners.single().onChatMessage(Role.AGENT, "Hello, I am Asha.", false)
+        val turn = (heard.events.single() as GraineEvent.ChatMessage).turn
+        assertEquals("t2", turn.id)
+        assertEquals("Hello, I am Asha.", turn.text)
+        assertFalse(turn.proactive)
+    }
+
+    @Test
+    fun chatControlsGoToTheSdk() {
+        start()
+        engine.chatOpen(null); engine.chatSend("Hi"); engine.chatRetry(); engine.chatClose()
+        engine.chatOpen(GraineChatSize.LARGE); engine.chatOpen(GraineChatSize.FULL); engine.chatOpen(GraineChatSize.COMPACT)
+        // Opening is the Android SDK's open — a bar on screen moves to the chat, at the size — and retrying is connecting.
+        assertEquals(
+            listOf("chatOpen:null", "chatSend:Hi", "chatConnect", "chatClose", "chatOpen:LARGE", "chatOpen:FULL", "chatOpen:COMPACT"),
+            port.did,
+        )
+    }
+
+    @Test
+    fun aNewConversationIsTheSdksAndItsRefusalTheSharedError() {
+        start()
+        var result: Result<Unit>? = null
+        engine.chatNewConversation { result = it }
+        assertEquals(listOf("newConversation"), port.did)
+        assertNull("nothing until the Android SDK answers", result)
+        port.newConversationDone!!.onResult(Unit, null)
+        assertTrue(result!!.isSuccess)
+        engine.chatNewConversation { result = it }
+        port.newConversationDone!!.onResult(null, GraineError(NativeErrorCode.DEVICE_LIMIT, "This device is not one of theirs."))
+        val e = result!!.exceptionOrNull() as GraineException
+        assertEquals(GraineErrorCode.DeviceLimit, e.code)
+        assertEquals("This device is not one of theirs.", e.message)
+    }
+
+    @Test
+    fun aRestoredTurnKeepsWhereItWasSaid() {
+        start()
+        port.chatTurns = listOf(
+            NativeChatTurn("b00000000001", Role.AGENT, "Hi, this is Asha.", Date(1_760_353_200_000), restored = true, channel = NativeChatTurn.Channel.VOICE),
+            NativeChatTurn("aa0000000002", Role.CUSTOMER, "Where is my order?", Date(1_760_356_800_000), restored = true),
+            NativeChatTurn("t1", Role.CUSTOMER, "one", Date(1_760_360_400_000), NativeChatTurn.Delivery.SENDING),
+        )
+        port.chatChanged()
+        val turns = heard.chat!!.first
+        assertEquals(listOf(true, true, false), turns.map { it.restored })
+        assertEquals(listOf(GraineChatChannel.VOICE, GraineChatChannel.CHAT, GraineChatChannel.CHAT), turns.map { it.channel })
+        assertEquals(listOf(null, GraineDelivery.SENT, GraineDelivery.SENDING), turns.map { it.delivery })
+        assertEquals(Instant.fromEpochMilliseconds(1_760_353_200_000), turns[0].at)
+    }
+
+    @Test
+    fun theConfigurationIsTheSdksFieldForField() {
+        val native = AndroidMapping.config(
+            GraineConfig(
+                baseUrl = "https://www.graine.ai", publishableKey = "pk_test_kmp", variables = mapOf("plan" to "Gold"), appVersion = "2.4.0",
+                endOnBackground = false, debug = true, captureTaps = false, transport = GraineTransport.WEBRTC, chatSize = GraineChatSize.LARGE,
+            )
+        )
+        assertEquals("https://www.graine.ai", native.baseUrl)
+        assertEquals("pk_test_kmp", native.publishableKey)
+        assertEquals(mapOf("plan" to "Gold"), native.variables)
+        assertEquals("2.4.0", native.appVersion)
+        assertFalse(native.endOnBackground)
+        assertTrue(native.debug)
+        assertFalse(native.captureTaps)
+        assertEquals(Transport.WEBRTC, native.transport)
+        assertEquals(NativeChatSize.LARGE, native.chatSize)
+        val plain = AndroidMapping.config(GraineConfig("https://www.graine.ai", "pk_test_kmp"))
+        assertNull("the dashboard decides", plain.chatSize)
+        assertNull(plain.transport)
+        assertEquals(NativeChatSize.entries.map { it.name }, GraineChatSize.entries.map { AndroidMapping.chatSize(it).name })
+    }
+
+    // ── native calls ──────────────────────────────────────────────────────
+
+    private fun ring(id: String = "c1", hosted: Boolean = true) =
+        GraineCall(id, GraineCall.Direction.INCOMING, "Asha · Graine Care", "payment_due", emptyMap(), hosted)
+
+    @Test
+    fun aRingIsAnIncomingCallAndARingingOutcome() {
+        start()
+        port.callListeners.single().onIncomingCall(ring())
+        assertEquals(GraineIncomingCall("c1", "Asha · Graine Care", "payment_due", true), heard.incoming.single())
+        assertEquals(GraineCallOutcome("c1", GraineCallOutcome.Kind.RINGING, hosted = true), heard.outcomes.single())
+    }
+
+    @Test
+    fun anEndedCallSaysWhoEndedItAndHowLongItLasted() {
+        start()
+        val c = ring()
+        val l = port.callListeners.single()
+        l.onIncomingCall(c)
+        port.callState = NativeCallState.ACTIVE; port.call = c
+        l.onCallState(NativeCallState.ACTIVE, c)
+        assertEquals(GraineCallState.ACTIVE, heard.calls!!.state)
+        assertTrue(heard.calls!!.incoming && heard.calls!!.hosted)
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ANSWERED, callId = "c1", hosted = true))
+        l.onCallCaption(Role.AGENT, "Your payment is due", false)
+        assertEquals(GraineCaption(GraineRole.AGENT, "Your payment is due", false), heard.calls!!.caption)
+        // The Android SDK measures the call; its length is passed on as it says.
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ENDED, NativeOutcome.EndReason.REMOTE, callId = "c1", durationSeconds = 63, hosted = true))
+        assertEquals(
+            listOf(
+                GraineCallOutcome("c1", GraineCallOutcome.Kind.RINGING, hosted = true),
+                GraineCallOutcome("c1", GraineCallOutcome.Kind.ANSWERED, hosted = true),
+                GraineCallOutcome("c1", GraineCallOutcome.Kind.ENDED, "remote", 63, true),
+            ),
+            heard.outcomes,
+        )
+        port.callState = NativeCallState.IDLE; port.call = null
+        l.onCallState(NativeCallState.IDLE, null)
+        assertNull(heard.calls!!.caption)
+        assertFalse(heard.calls!!.showsCallScreen)
+    }
+
+    @Test
+    fun aRingNobodyAnsweredIsKeptForCallBack() {
+        start()
+        val c = ring()
+        val l = port.callListeners.single()
+        l.onIncomingCall(c)
+        port.callState = NativeCallState.RINGING; port.call = c
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.MISSED, callId = "c1", hosted = true))
+        assertEquals(GraineCallOutcome("c1", GraineCallOutcome.Kind.MISSED, "no_answer", null, true), heard.outcomes.last())
+        val missed = heard.calls!!.missedCall!!
+        assertEquals("c1", missed.callId)
+        assertEquals("payment_due", missed.reason)
+        assertEquals(Instant.fromEpochMilliseconds(1_760_000_000_000L), missed.at)
+        assertTrue(heard.calls!!.showsCallScreen)
+
+        assertNull("no screen in front to call from", engine.callsCallBack())
+        assertTrue("the missed call is still there to call back", heard.calls!!.missedCall != null)
+        front = Activity()
+        assertEquals("call_10", engine.callsCallBack())
+        assertEquals("c1" to "payment_due", port.callBackArgs)
+        assertNull(heard.calls!!.missedCall)
+    }
+
+    @Test
+    fun aRingWhileAnotherCallIsLiveIsBusy() {
+        start()
+        port.call = ring("live")
+        port.callState = NativeCallState.ACTIVE
+        port.callAgentName = "default"
+        port.callListeners.single().onCallOutcome("c2", NativeOutcome(NativeOutcome.Kind.MISSED, callId = "c2", busy = true))
+        // Never the live call's agent: the refused ring's is not known here.
+        assertEquals(GraineCallOutcome("c2", GraineCallOutcome.Kind.MISSED, "busy"), heard.outcomes.single())
+        assertNull(heard.calls!!.missedCall)
+    }
+
+    @Test
+    fun aCallSaysWhichAgentItIsWithFromRingToItsLastWord() {
+        start()
+        val c = ring()
+        val l = port.callListeners.single()
+        // The Android SDK has the ring in progress, routed to the help desk, before it tells anyone.
+        port.call = c; port.callState = NativeCallState.RINGING; port.callAgentName = "help"
+        l.onCallState(NativeCallState.RINGING, c)
+        l.onIncomingCall(c)
+        assertEquals("help", heard.incoming.single().agent)
+        assertEquals("help", heard.calls!!.agent)
+        port.callState = NativeCallState.ACTIVE
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ANSWERED, callId = "c1", hosted = true))
+        port.callState = NativeCallState.ENDED
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ENDED, NativeOutcome.EndReason.LOCAL, callId = "c1", durationSeconds = 9, hosted = true))
+        // Idle again: no call, so no agent on the screen's state — and a late word on the call still knows its agent.
+        port.call = null; port.callState = NativeCallState.IDLE; port.callAgentName = null
+        l.onCallState(NativeCallState.IDLE, null)
+        assertNull(heard.calls!!.agent)
+        assertEquals(listOf("help", "help", "help"), heard.outcomes.map { it.agent })
+        assertEquals(GraineCallOutcome("c1", GraineCallOutcome.Kind.ENDED, "local", 9, true, "help"), heard.outcomes.last())
+
+        // A call the user places is with the agent it was placed with: the Android SDK names it from the start.
+        val out = GraineCall("call_9", GraineCall.Direction.OUTGOING, null, "kyc_help", emptyMap())
+        port.call = out; port.callState = NativeCallState.CONNECTING; port.callAgentName = "default"
+        l.onCallState(NativeCallState.CONNECTING, out)
+        assertEquals("default", heard.calls!!.agent)
+        port.call = null; port.callState = NativeCallState.IDLE; port.callAgentName = null
+        l.onCallOutcome("call_9", NativeOutcome(NativeOutcome.Kind.FAILED, error = "The microphone permission was not granted.", callId = "call_9"))
+        assertEquals("default", heard.outcomes.last().agent)
+        l.onCallOutcome("call_9", NativeOutcome(NativeOutcome.Kind.FAILED, error = "again", callId = "call_9"))
+        assertNull("after its last word the call is forgotten", heard.outcomes.last().agent)
+    }
+
+    @Test
+    fun aCallIsPlacedFromTheScreenInFront() {
+        start()
+        assertNull(engine.callsStart("kyc_help", emptyMap()))
+        front = Activity()
+        assertEquals("call_9", engine.callsStart("kyc_help", mapOf("order" to "A-1")))
+        assertTrue(port.startedFrom === front)
+        engine.callsAnswer(); engine.callsDecline(); engine.callsEnd(); engine.callsSetMuted(true); engine.callsSetSpeaker(false)
+        assertEquals(
+            listOf("startCall:kyc_help:{order=A-1}", "answer", "decline", "endCall", "callMuted:true", "speaker:false"),
+            port.did,
+        )
+    }
+
+    @Test
+    fun theCallsConfigurationIsTheSdks() {
+        start()
+        engine.callsConfigure(GraineCallsConfig(ringTimeoutSeconds = 45, smallIcon = 7))
+        assertEquals(NativeCallsConfig(displayName = "Graine Demo", smallIcon = 7, ringtone = null, callActivity = null, ringTimeoutMs = 45_000), port.callsConfig)
+        engine.callsConfigure(GraineCallsConfig(displayName = "Asha", ringTimeoutSeconds = 1))
+        assertEquals("Asha", port.callsConfig!!.displayName)
+        assertEquals(5_000L, port.callsConfig!!.ringTimeoutMs)
+    }
+
+    // ── the voice bar, and what else the SDK reports ──────────────────────
+
+    @Test
+    fun theVoiceBarsCallStartsFromTheScreenInFront() {
+        start()
+        engine.voiceStart()
+        assertEquals(listOf("startVoice"), port.did)
+        front = Activity()
+        engine.voiceStart()
+        engine.voiceSetMuted(true)
+        assertEquals(GraineVoiceInfo(connected = false, connecting = false, muted = true), heard.voice)
+        port.voiceConnected = true
+        port.listeners.single().onCallState(true, false)
+        assertTrue(heard.voice!!.connected)
+        assertEquals(listOf("startVoice", "attachVoice", "startVoice", "voiceMuted:true"), port.did)
+    }
+
+    @Test
+    fun componentsFrictionAndActionsAreEvents() {
+        start()
+        val l = port.listeners.single()
+        l.onWidget(JSONObject("""{"widget_id":"w1","kind":"choices","title":"Pick one","options":["a","b"]}"""))
+        l.onWidgetPending(JSONObject("""{"kind":"calendar_slots"}"""))
+        l.onFriction(FrictionSignal("stalled_on_step", "kyc", "Stuck on PAN.", emptyMap(), 120, 2, false))
+        l.onActionRequested("mark_done")
+        l.onActionCompleted("mark_done", ActionResult.ok("Done."))
+        l.onMicDenied("NotAllowedError")
+        l.onCaption(Role.CUSTOMER, "hello", true)
+        l.onEnded()
+        assertEquals(
+            listOf(
+                GraineEvent.Component(GraineComponent("w1", "choices", "Pick one", mapOf("widget_id" to "w1", "kind" to "choices", "title" to "Pick one", "options" to listOf("a", "b")))),
+                GraineEvent.ComponentPending(mapOf("kind" to "calendar_slots")),
+                GraineEvent.Friction("stalled_on_step", "kyc", "Stuck on PAN."),
+                GraineEvent.ActionRequested("mark_done"),
+                GraineEvent.ActionCompleted("mark_done", GraineActionResult.ok("Done.")),
+                GraineEvent.MicrophoneDenied("NotAllowedError"),
+                GraineEvent.Caption(GraineRole.USER, "hello", true),
+                GraineEvent.VoiceEnded,
+            ),
+            heard.events,
+        )
+    }
+
+    @Test
+    fun theVersionIsGradles() {
+        assertEquals(System.getProperty("graine.version"), GraineKmpVersion.NAME)
+    }
+}
