@@ -3,8 +3,10 @@ package ai.graine.inapp.kmp
 import android.app.Activity
 import android.app.Application
 import android.content.ContentProvider
+import android.content.ComponentCallbacks
 import android.content.ContentValues
 import android.content.Context
+import android.content.res.Configuration
 import android.database.Cursor
 import android.net.Uri
 import android.os.Bundle
@@ -52,6 +54,16 @@ internal object AndroidHost {
     }
 
     private val main by lazy { Handler(Looper.getMainLooper()) }
+
+    /** [changed] on every configuration change of the application — the phone switching light and dark among them. */
+    fun watchConfiguration(changed: () -> Unit) {
+        application?.registerComponentCallbacks(object : ComponentCallbacks {
+            override fun onConfigurationChanged(newConfig: Configuration) = changed()
+
+            @Suppress("OVERRIDE_DEPRECATION")
+            override fun onLowMemory() = Unit
+        })
+    }
 
     fun onMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)

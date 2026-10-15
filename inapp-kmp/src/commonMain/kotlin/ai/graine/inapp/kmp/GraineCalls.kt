@@ -47,6 +47,30 @@ data class GraineCallOutcome(
     }
 }
 
+/**
+ * How native calls carry their audio ([GraineCallsConfig.callTransport]).
+ *
+ *   AUTO       WebRTC when the app includes the platform's WebRTC module
+ *              (README → WebRTC calls), else the WebSocket. The default.
+ *   WEBSOCKET  always the WebSocket
+ *   WEBRTC     WebRTC whenever it can carry the call, else the WebSocket
+ *
+ * A call WebRTC cannot carry continues on the WebSocket inside the same call,
+ * and the dashboard can turn WebRTC off for an agent without an app release.
+ */
+enum class GraineCallTransport(val wire: String) {
+    AUTO("auto"), WEBSOCKET("websocket"), WEBRTC("webrtc");
+
+    companion object {
+        /** What a call runs on, from the platform's word: WEBRTC or WEBSOCKET, else null. */
+        fun ofCall(wire: String?): GraineCallTransport? = when (wire?.lowercase()) {
+            WEBRTC.wire -> WEBRTC
+            WEBSOCKET.wire -> WEBSOCKET
+            else -> null
+        }
+    }
+}
+
 /** A line said on the call (or in the voice bar's call): the agent's as it is spoken, the user's as it is heard. */
 data class GraineCaption(val role: GraineRole, val text: String, val live: Boolean)
 
@@ -97,6 +121,14 @@ data class GraineCallInfo(
      * one a ring was routed to. Null with no call.
      */
     val agent: String? = null,
+    /** What the call's audio runs on: WEBRTC or WEBSOCKET. Null with no call (and from a platform SDK that predates WebRTC). */
+    val transport: GraineCallTransport? = null,
+    /**
+     * Why a call that tried WebRTC runs on the WebSocket instead — `mint_failed`,
+     * `register_failed`, `no_response`, `no_answer`, `ice_timeout`, `error`, or
+     * the dashboard's choice. Null when it did not fall back.
+     */
+    val transportFallbackReason: String? = null,
 ) {
     /** A call screen has something to show: a call, or a missed ring to call back. */
     val showsCallScreen: Boolean get() = state != GraineCallState.IDLE || missedCall != null
@@ -114,6 +146,8 @@ data class GraineCallsConfig(
     val smallIcon: Int = 0,
     /** iOS: list the calls in the Phone app's Recents. */
     val includeInRecents: Boolean = false,
+    /** How calls carry their audio: [GraineCallTransport.AUTO] (WebRTC when the app includes it), WEBSOCKET or WEBRTC. */
+    val callTransport: GraineCallTransport = GraineCallTransport.AUTO,
 )
 
 /**

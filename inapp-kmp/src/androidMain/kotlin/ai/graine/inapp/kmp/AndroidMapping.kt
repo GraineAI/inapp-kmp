@@ -3,6 +3,7 @@ package ai.graine.inapp.kmp
 import ai.graine.inapp.ActionResult
 import ai.graine.inapp.GraineCallOutcome as NativeOutcome
 import ai.graine.inapp.GraineCallState as NativeCallState
+import ai.graine.inapp.GraineCallTransport as NativeCallTransport
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
 import ai.graine.inapp.GraineChatSize as NativeChatSize
@@ -169,6 +170,7 @@ internal object AndroidMapping {
         smallIcon = c.smallIcon,
         ringtone = c.ringtone?.takeIf { it.isNotBlank() }?.let(ringtone),
         ringTimeoutMs = c.ringTimeoutSeconds.coerceIn(5, 300) * 1000L,
+        callTransport = NativeCallTransport.valueOf(c.callTransport.name),
     )
 
     /** A JSON value from the Android SDK (org.json) as plain Kotlin values, for anything not read through [args]. */

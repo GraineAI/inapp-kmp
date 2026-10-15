@@ -270,10 +270,10 @@ class GraineApiTest {
         configured().sink.session(bookingSession(minLeadMinutes = 30, maxDaysAhead = 7))
         val soon = assertFailsWith<GraineException> { Graine.scheduleCall(Clock.System.now() + 10.minutes) }
         assertEquals(GraineErrorCode.TooSoon, soon.code)
-        assertEquals("Pick a time at least 30 minutes from now.", soon.message)
+        assertEquals("Pick a time at least 30 minutes from now", soon.message)
         val far = assertFailsWith<GraineException> { Graine.scheduleCall(Clock.System.now() + 8.days) }
         assertEquals(GraineErrorCode.TooFar, far.code)
-        assertEquals("Pick a time within the next 7 days.", far.message)
+        assertEquals("Pick a time within 7 days", far.message)
         assertTrue(engine.scheduled.isEmpty())
     }
 
@@ -363,6 +363,67 @@ class GraineApiTest {
         assertTrue(Graine.chat.typing.value)
         Graine.chat.open(); Graine.chat.send("  "); Graine.chat.send("Where is my order?"); Graine.chat.retry(); Graine.chat.close()
         assertEquals(listOf("chatOpen", "chatSend:Where is my order?", "chatRetry", "chatClose"), engine.calls)
+    }
+
+    @Test
+    fun aComponentIsAnsweredFromTheAppsOwnUiAndTheUpcomingCallsAreTheChats() {
+        configured()
+        Graine.chat.answerWidget("w1", mapOf("ids" to listOf("creta", "seltos")), "Compare: Creta and Seltos")
+        assertEquals(Triple("w1", mapOf<String, Any?>("ids" to listOf("creta", "seltos")), "Compare: Creta and Seltos"), engine.answers.single())
+        assertTrue(Graine.chat.upcomingCalls.value.isEmpty(), "none before the platform says")
+        val call = GraineScheduledCall("sc_1", Instant.parse("2026-10-16T12:30:00Z"), GraineCallStatus.Scheduled, GraineCallSource.App, "Talk through my order")
+        engine.sink.upcomingCalls(listOf(call))
+        assertEquals(listOf(call), Graine.chat.upcomingCalls.value)
+        Graine.chat.refreshUpcomingCalls()
+        Graine.chat.cancelUpcomingCall("  ")
+        Graine.chat.cancelUpcomingCall("sc_1")
+        assertEquals(listOf("answerWidget:w1", "refreshUpcoming", "cancelUpcoming:sc_1"), engine.calls)
+    }
+
+    @Test
+    fun theCaptionsSwitchIsTheVoicesAndOnByDefault() {
+        configured()
+        assertTrue(Graine.voice.state.value.captionsOn, "an accessibility default")
+        assertTrue(Graine.voice.state.value.captions.isEmpty())
+        Graine.voice.setCaptionsOn(false)
+        Graine.voice.clearCaptions()
+        assertEquals(listOf("captionsOn:false", "clearCaptions"), engine.calls)
+        val said = listOf(GraineCaption(GraineRole.AGENT, "Hello", live = false))
+        engine.sink.voice(GraineVoiceInfo(connected = true, captionsOn = false, captions = said))
+        assertFalse(Graine.voice.state.value.captionsOn)
+        assertEquals(said, Graine.voice.state.value.captions)
+    }
+
+    @Test
+    fun theMergedVariablesAreWhatThePlatformWillSend() {
+        configured()
+        engine.mergedVariables = mapOf("plan" to "Pro", "name" to "Asha")
+        assertEquals(mapOf("plan" to "Pro", "name" to "Asha"), Graine.currentVariables())
+        assertEquals(Graine.currentVariables(), Graine.agent()!!.currentVariables(), "the default agent's")
+    }
+
+    @Test
+    fun theDesignsTokensAreAFlowThePlatformFeedsNullUntilThen() {
+        assertNull(Graine.theme.value, "readable before configure: no tokens")
+        configured()
+        val tokens = ThemeBridge.parse(
+            """{"scheme":"dark","colors":{"background":"#0E0F11","surface":"#17181B","surfaceRaised":"#1F2125","text":"#F5F5F4",
+                "textMuted":"#A0A5AE","border":"#2A2D33","accent":"#318CE7","onAccent":"#FFFFFF","accentSoft":"#1B2D44",
+                "success":"#16A34A","warning":"#D97706","danger":"#DC2626","userBubble":"#318CE7","userBubbleText":"#FFFFFF",
+                "agentBubble":"#1F2125","agentBubbleText":"#F5F5F4","scrim":"#000000"}}"""
+        )!!
+        engine.sink.theme(tokens)
+        assertEquals(tokens, Graine.theme.value)
+        assertEquals(tokens, Graine.agent()!!.theme.value, "the default agent's")
+        engine.sink.theme(null)
+        assertNull(Graine.theme.value, "a session without a design")
+    }
+
+    @Test
+    fun clearAsksThePlatformToEmptyTheScreenAndNothingElse() {
+        configured()
+        Graine.chat.clear()
+        assertEquals(listOf("chatClear"), engine.calls, "the screen only: no close, no new conversation, no forget")
     }
 
     @Test
@@ -471,7 +532,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.8.0", GraineKmpVersion.NAME)
+        assertEquals("0.9.0", GraineKmpVersion.NAME)
     }
 
     @Test

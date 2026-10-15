@@ -42,6 +42,9 @@ internal class FakeEngine : GraineEngine {
     override fun forgetMemory(done: (Result<Int>) -> Unit) { calls += "forgetMemory"; forgetAnswer?.let(done) }
     override fun memories(done: (Result<List<GraineMemory>>) -> Unit) { calls += "memories"; memoriesAnswer?.let(done) }
     override fun setVariables(values: Map<String, Any?>?) { calls += "setVariables:${values?.keys}" }
+    /** What the platform SDK says it will send. */
+    var mergedVariables: Map<String, String> = emptyMap()
+    override fun currentVariables(): Map<String, String> = mergedVariables
     override fun setScreen(screen: GraineScreen?) { screens += screen; calls += "setScreen" }
     override fun updateField(field: GraineField) { calls += "updateField:${field.name}" }
     override fun removeField(name: String) { calls += "removeField:$name" }
@@ -92,6 +95,14 @@ internal class FakeEngine : GraineEngine {
     override fun chatClose() { calls += "chatClose" }
     override fun chatSend(text: String) { calls += "chatSend:$text" }
     override fun chatRetry() { calls += "chatRetry" }
+    override fun chatClear() { calls += "chatClear" }
+    override fun chatRefreshUpcoming() { calls += "refreshUpcoming" }
+    override fun chatCancelUpcoming(id: String) { calls += "cancelUpcoming:$id" }
+    val answers = mutableListOf<Triple<String, Map<String, Any?>, String>>()
+    override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) {
+        answers += Triple(widgetId, data, summary)
+        calls += "answerWidget:$widgetId"
+    }
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) { calls += "newConversation"; newConversationAnswer?.let(done) }
 
     override fun callsConfigure(config: GraineCallsConfig) { callsConfig = config; calls += "callsConfigure" }
@@ -108,6 +119,8 @@ internal class FakeEngine : GraineEngine {
     override fun voiceStart() { calls += "voiceStart" }
     override fun voiceEnd() { calls += "voiceEnd" }
     override fun voiceSetMuted(muted: Boolean) { calls += "voiceMuted:$muted" }
+    override fun voiceSetCaptionsOn(on: Boolean) { calls += "captionsOn:$on" }
+    override fun voiceClearCaptions() { calls += "clearCaptions" }
 }
 
 /** A session that lets users book, with the given limits. */

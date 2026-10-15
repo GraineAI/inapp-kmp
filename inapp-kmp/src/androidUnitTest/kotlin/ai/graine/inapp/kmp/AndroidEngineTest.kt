@@ -8,7 +8,9 @@ import ai.graine.inapp.GraineCallOutcome as NativeOutcome
 import ai.graine.inapp.GraineCallSource as NativeCallSource
 import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
+import ai.graine.inapp.GraineCallTransport as NativeCallTransport
 import ai.graine.inapp.GraineCallback
+import ai.graine.inapp.GraineCaption as NativeCaption
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
 import ai.graine.inapp.GraineChatSize as NativeChatSize
 import ai.graine.inapp.GraineChatTurn as NativeChatTurn
@@ -52,10 +54,14 @@ class AndroidEngineTest {
         val outcomes = mutableListOf<GraineCallOutcome>()
         val incoming = mutableListOf<GraineIncomingCall>()
         var voice: GraineVoiceInfo? = null
+        val themes = mutableListOf<GraineThemeTokens?>()
+        override fun theme(tokens: GraineThemeTokens?) { themes += tokens }
         override fun session(session: GraineSession) { sessions += session }
         override fun sessionFailed(message: String) { failures += message }
         override fun event(event: GraineEvent) { events += event }
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) { chat = Triple(turns, status, typing) }
+        var upcoming: List<GraineScheduledCall>? = null
+        override fun upcomingCalls(calls: List<GraineScheduledCall>) { upcoming = calls }
         override fun calls(info: GraineCallInfo) { calls = info }
         override fun callOutcome(outcome: GraineCallOutcome) { outcomes += outcome }
         override fun incomingCall(call: GraineIncomingCall) { incoming += call }
@@ -85,12 +91,15 @@ class AndroidEngineTest {
         override var installId = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
         override var memoryEnabled = true
         override var session: SessionConfig? = null
+        override var themeTokensJson: String? = null
         override fun addListener(listener: GraineListener) { listeners += listener }
         override fun identify(traits: Map<String, Any?>?, memory: Boolean?) { did += "identify:$traits:$memory" }
         override fun setMemory(enabled: Boolean) { did += "setMemory:$enabled" }
         override fun forgetMemory(done: GraineCallback<Int>) { forget = done }
         override fun memories(done: GraineCallback<List<NativeMemory>>) { memoriesDone = done }
         override fun setVariables(values: Map<String, Any?>?) { did += "setVariables:$values" }
+        var merged: Map<String, String> = emptyMap()
+        override fun currentVariables(): Map<String, String> = merged
         override fun setScreen(screen: NativeScreen?) { screens.add(screen) }
         override fun updateField(field: NativeField) { fields.add(field) }
         override fun removeField(name: String) { did += "removeField:$name" }
@@ -117,13 +126,20 @@ class AndroidEngineTest {
         override var chatConnected = false
         override var chatConnecting = false
         override var chatFailed = false
+        override var chatReconnecting = false
         override var chatTyping = false
+        override var chatUpcomingCalls: List<NativeScheduledCall> = emptyList()
         override fun addChatChangeListener(listener: Runnable) { chatListeners += listener }
         override fun chatOpen(size: NativeChatSize?) { did += "chatOpen:$size" }
         override fun chatConnect() { did += "chatConnect" }
+        override fun chatClear() { did += "chatClear" }
         override fun chatClose() { did += "chatClose" }
         override fun chatSend(text: String) { did += "chatSend:$text" }
         override fun chatNewConversation(done: GraineCallback<Unit>) { did += "newConversation"; newConversationDone = done }
+        override fun chatRefreshUpcoming() { did += "refreshUpcoming" }
+        override fun chatCancelUpcoming(id: String) { did += "cancelUpcoming:$id" }
+        val answered = mutableListOf<Triple<String, Map<String, Any?>, String>>()
+        override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) { answered += Triple(widgetId, data, summary) }
         fun chatChanged() = chatListeners.forEach { it.run() }
 
         override var callState = NativeCallState.IDLE
@@ -134,6 +150,8 @@ class AndroidEngineTest {
         override val callSpeaker: Boolean get() = speakerNow
         override var callAgentSpeaking = false
         override var callAgentName: String? = null
+        override var callTransport: String? = null
+        override var callTransportFallbackReason: String? = null
         override fun addCallListener(listener: GraineCallListener) { callListeners += listener }
         override fun configureCalls(config: NativeCallsConfig) { callsConfig = config }
         override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? {
@@ -154,12 +172,18 @@ class AndroidEngineTest {
         override fun startVoice() { did += "startVoice" }
         override fun endVoice() { did += "endVoice" }
         override fun setVoiceMuted(muted: Boolean) { voiceMutedNow = muted; did += "voiceMuted:$muted" }
+        var captionsOnNow = true
+        override val voiceCaptionsOn: Boolean get() = captionsOnNow
+        override var voiceCaptions: List<NativeCaption> = emptyList()
+        override fun setVoiceCaptionsOn(on: Boolean) { captionsOnNow = on; did += "captionsOn:$on" }
+        override fun clearVoiceCaptions() { voiceCaptions = emptyList(); did += "clearCaptions" }
     }
 
     private lateinit var port: Port
     private lateinit var heard: Heard
     private lateinit var engine: AndroidEngine
     private var front: Activity? = null
+    private var appearanceChanged: (() -> Unit)? = null
 
     @Before
     fun setUp() {
@@ -174,6 +198,7 @@ class AndroidEngineTest {
             ringtone = { null },
             onMain = { it() },
             onMainSync = { it() },
+            watchAppearance = { appearanceChanged = it },
         )
     }
 
@@ -401,10 +426,69 @@ class AndroidEngineTest {
 
         port.chatConnecting = false; port.chatConnected = true; port.chatChanged()
         assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
-        port.chatConnected = false; port.chatConnecting = true; port.listeners.single().onChatState(false, true)
+        port.chatConnected = false; port.chatConnecting = true; port.chatReconnecting = true; port.listeners.single().onChatState(false, true)
         assertEquals(GraineChatStatus.RECONNECTING, heard.chat!!.second)
-        port.chatConnecting = false; port.chatFailed = true; port.chatChanged()
+        port.chatConnecting = false; port.chatReconnecting = false; port.chatFailed = true; port.chatChanged()
         assertEquals(GraineChatStatus.OFFLINE, heard.chat!!.second)
+    }
+
+    @Test
+    fun aFirstTryThatFailedIsAReconnectAsTheSdkSaysIt() {
+        start()
+        port.chatConnecting = true; port.chatChanged()
+        assertEquals(GraineChatStatus.CONNECTING, heard.chat!!.second)
+        // The Android SDK retries a first connect that failed on the same ladder as a drop, and says so.
+        port.chatReconnecting = true; port.chatChanged()
+        assertEquals("the iOS SDK's word for the same moment", GraineChatStatus.RECONNECTING, heard.chat!!.second)
+        port.chatReconnecting = false; port.chatChanged()
+        assertEquals("asked again after giving up: a fresh connect", GraineChatStatus.CONNECTING, heard.chat!!.second)
+    }
+
+    @Test
+    fun theChatsUpcomingCallsAreTheSdksCardAndItsControlsGoToTheSdk() {
+        start()
+        port.chatUpcomingCalls = listOf(
+            NativeScheduledCall("sc_1", Date(1_760_000_000_000), NativeCallStatus.SCHEDULED, NativeCallSource.AGENT, "Your delivery"),
+        )
+        port.chatChanged()
+        val call = heard.upcoming!!.single()
+        assertEquals("sc_1", call.id)
+        assertEquals(Instant.fromEpochMilliseconds(1_760_000_000_000), call.at)
+        assertEquals(GraineCallStatus.Scheduled, call.status)
+        assertEquals(GraineCallSource.Agent, call.source)
+        assertEquals("Your delivery", call.reason)
+        engine.chatRefreshUpcoming(); engine.chatCancelUpcoming("sc_1")
+        assertEquals(listOf("refreshUpcoming", "cancelUpcoming:sc_1"), port.did)
+    }
+
+    @Test
+    fun aComponentAnsweredFromTheAppsOwnUiGoesToTheSdksRouter() {
+        start()
+        engine.answerWidget("w1", mapOf("id" to "creta"), "The Creta, please.")
+        assertEquals(listOf(Triple("w1", mapOf<String, Any?>("id" to "creta"), "The Creta, please.")), port.answered)
+    }
+
+    @Test
+    fun theMergedVariablesAreTheSdks() {
+        start()
+        port.merged = mapOf("plan" to "Pro", "name" to "Asha")
+        assertEquals(mapOf("plan" to "Pro", "name" to "Asha"), engine.currentVariables())
+    }
+
+    @Test
+    fun theDesignsTokensAreTheSdksAndFollowTheSessionAndTheAppearance() {
+        val light = TOKENS.replace("\"scheme\":\"dark\"", "\"scheme\":\"light\"")
+        port.themeTokensJson = null
+        start()
+        assertEquals("no design yet: no tokens", listOf<GraineThemeTokens?>(null), heard.themes)
+        port.themeTokensJson = light
+        port.listeners.single().onSessionReady(session())
+        assertEquals("light", heard.themes.last()!!.scheme)
+        assertEquals("#318CE7", heard.themes.last()!!.colors.accent)
+        // The phone switched to dark: the Android SDK's tokens are dark now, and they are read again.
+        port.themeTokensJson = TOKENS
+        appearanceChanged!!()
+        assertTrue(heard.themes.last()!!.isDark)
     }
 
     @Test
@@ -427,11 +511,12 @@ class AndroidEngineTest {
     @Test
     fun chatControlsGoToTheSdk() {
         start()
-        engine.chatOpen(null); engine.chatSend("Hi"); engine.chatRetry(); engine.chatClose()
+        engine.chatOpen(null); engine.chatSend("Hi"); engine.chatRetry(); engine.chatClear(); engine.chatClose()
         engine.chatOpen(GraineChatSize.LARGE); engine.chatOpen(GraineChatSize.FULL); engine.chatOpen(GraineChatSize.COMPACT)
-        // Opening is the Android SDK's open — a bar on screen moves to the chat, at the size — and retrying is connecting.
+        // Opening is the Android SDK's open — a bar on screen moves to the chat, at the size — retrying is connecting,
+        // and clearing is the Android SDK's clear: the screen only.
         assertEquals(
-            listOf("chatOpen:null", "chatSend:Hi", "chatConnect", "chatClose", "chatOpen:LARGE", "chatOpen:FULL", "chatOpen:COMPACT"),
+            listOf("chatOpen:null", "chatSend:Hi", "chatConnect", "chatClear", "chatClose", "chatOpen:LARGE", "chatOpen:FULL", "chatOpen:COMPACT"),
             port.did,
         )
     }
@@ -624,6 +709,31 @@ class AndroidEngineTest {
         engine.callsConfigure(GraineCallsConfig(displayName = "Asha", ringTimeoutSeconds = 1))
         assertEquals("Asha", port.callsConfig!!.displayName)
         assertEquals(5_000L, port.callsConfig!!.ringTimeoutMs)
+        assertEquals("AUTO unless the app chose", NativeCallTransport.AUTO, port.callsConfig!!.callTransport)
+        for (t in GraineCallTransport.entries) {
+            engine.callsConfigure(GraineCallsConfig(callTransport = t))
+            assertEquals(t.name, port.callsConfig!!.callTransport.name)
+        }
+    }
+
+    @Test
+    fun aCallSaysWhatItsAudioRunsOnAndWhyItFellBack() {
+        start()
+        val l = port.callListeners.single()
+        val out = GraineCall("call_9", GraineCall.Direction.OUTGOING, null, "kyc_help", emptyMap())
+        port.call = out; port.callState = NativeCallState.CONNECTING; port.callTransport = "webrtc"
+        l.onCallState(NativeCallState.CONNECTING, out)
+        assertEquals(GraineCallTransport.WEBRTC, heard.calls!!.transport)
+        assertNull(heard.calls!!.transportFallbackReason)
+        port.callState = NativeCallState.ACTIVE; port.callTransport = "websocket"; port.callTransportFallbackReason = "no_answer"
+        l.onCallState(NativeCallState.ACTIVE, out)
+        assertEquals(GraineCallTransport.WEBSOCKET, heard.calls!!.transport)
+        assertEquals("no_answer", heard.calls!!.transportFallbackReason)
+        // Idle: no call, so nothing about its audio — even if the SDK has not cleared it yet.
+        port.call = null; port.callState = NativeCallState.IDLE
+        l.onCallState(NativeCallState.IDLE, null)
+        assertNull(heard.calls!!.transport)
+        assertNull(heard.calls!!.transportFallbackReason)
     }
 
     // ── the voice bar, and what else the SDK reports ──────────────────────
@@ -641,6 +751,26 @@ class AndroidEngineTest {
         port.listeners.single().onCallState(true, false)
         assertTrue(heard.voice!!.connected)
         assertEquals(listOf("startVoice", "attachVoice", "startVoice", "voiceMuted:true"), port.did)
+    }
+
+    @Test
+    fun theCaptionsSwitchAndWhatWasSaidAreTheSdks() {
+        start()
+        port.voiceConnected = true
+        port.voiceCaptions = listOf(NativeCaption(Role.CUSTOMER, "What does it cost?", false), NativeCaption(Role.AGENT, "It costs", true))
+        port.listeners.single().onCaption(Role.AGENT, "It costs", true)
+        assertEquals(
+            listOf(GraineCaption(GraineRole.USER, "What does it cost?", false), GraineCaption(GraineRole.AGENT, "It costs", true)),
+            heard.voice!!.captions,
+        )
+        assertTrue("on by default", heard.voice!!.captionsOn)
+        engine.voiceSetCaptionsOn(false)
+        assertFalse(heard.voice!!.captionsOn)
+        assertEquals("off keeps what was said", 2, heard.voice!!.captions.size)
+        engine.voiceClearCaptions()
+        assertTrue(heard.voice!!.captions.isEmpty())
+        assertTrue("the call goes on", heard.voice!!.connected)
+        assertEquals(listOf("captionsOn:false", "clearCaptions"), port.did)
     }
 
     @Test
@@ -673,5 +803,13 @@ class AndroidEngineTest {
     @Test
     fun theVersionIsGradles() {
         assertEquals(System.getProperty("graine.version"), GraineKmpVersion.NAME)
+    }
+
+    private companion object {
+        /** A token set as the Android SDK writes one (ThemeTokens.toJson), dark. */
+        val TOKENS = """{"v":1,"preset":"graine-classic","scheme":"dark","colors":{"background":"#0E0F11","surface":"#17181B",
+            "surfaceRaised":"#1F2125","text":"#F5F5F4","textMuted":"#A0A5AE","border":"#2A2D33","accent":"#318CE7","onAccent":"#FFFFFF",
+            "accentSoft":"#1B2D44","success":"#16A34A","warning":"#D97706","danger":"#DC2626","userBubble":"#318CE7",
+            "userBubbleText":"#FFFFFF","agentBubble":"#1F2125","agentBubbleText":"#F5F5F4","scrim":"#000000"}}"""
     }
 }

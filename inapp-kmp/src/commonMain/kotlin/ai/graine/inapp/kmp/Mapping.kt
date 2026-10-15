@@ -81,10 +81,14 @@ internal fun componentOf(frame: Map<String, Any?>): GraineComponent? {
 
 /** THE CHAT'S CONNECTION AS ONE WORD, from a platform that reports flags (Android). */
 internal object ChatInference {
-    /** The connection's word, from flags: a connect after being online is a reconnect. */
-    fun status(connected: Boolean, connecting: Boolean, failed: Boolean, previous: GraineChatStatus): GraineChatStatus = when {
+    /**
+     * The connection's word, from flags. `reconnecting` is the platform's own:
+     * a drop — or a first try that failed — being made again, as the iOS SDK
+     * says it.
+     */
+    fun status(connected: Boolean, connecting: Boolean, failed: Boolean, reconnecting: Boolean): GraineChatStatus = when {
         connected -> GraineChatStatus.ONLINE
-        connecting -> if (previous == GraineChatStatus.ONLINE || previous == GraineChatStatus.RECONNECTING) GraineChatStatus.RECONNECTING else GraineChatStatus.CONNECTING
+        connecting -> if (reconnecting) GraineChatStatus.RECONNECTING else GraineChatStatus.CONNECTING
         failed -> GraineChatStatus.OFFLINE
         else -> GraineChatStatus.IDLE
     }
@@ -197,8 +201,13 @@ internal object Bridge {
         )
     }
 
-    /** The chat: its turns, its connection's word and whether the agent is typing. */
-    data class Chat(val turns: List<GraineChatTurn>, val status: GraineChatStatus, val typing: Boolean)
+    /** The chat: its turns, its connection's word, whether the agent is typing, and its upcoming calls (none from an older facade). */
+    data class Chat(
+        val turns: List<GraineChatTurn>,
+        val status: GraineChatStatus,
+        val typing: Boolean,
+        val upcoming: List<GraineScheduledCall> = emptyList(),
+    )
 
     fun chat(json: String?): Chat {
         val o = Json.obj(json) ?: return Chat(emptyList(), GraineChatStatus.IDLE, false)
@@ -210,7 +219,8 @@ internal object Bridge {
             else -> GraineChatStatus.IDLE
         }
         val turns = (o["turns"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { t -> turn(t) } }
-        return Chat(turns, status, o["typing"] == true)
+        val upcoming = (o["upcomingCalls"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { c -> scheduledCall(c) } }
+        return Chat(turns, status, o["typing"] == true, upcoming)
     }
 
     fun turn(o: Map<*, *>): GraineChatTurn? {
@@ -273,6 +283,8 @@ internal object Bridge {
             caption = caption,
             missedCall = missed,
             agent = str(o["agent"]),
+            transport = GraineCallTransport.ofCall(str(o["transport"])),
+            transportFallbackReason = str(o["transportFallbackReason"]),
         )
     }
 
@@ -291,7 +303,19 @@ internal object Bridge {
 
     fun voice(json: String?): GraineVoiceInfo {
         val o = Json.obj(json) ?: return GraineVoiceInfo()
-        return GraineVoiceInfo(connected = o["connected"] == true, connecting = o["connecting"] == true, muted = o["muted"] == true)
+        val captions = (o["captions"] as? List<*>).orEmpty().mapNotNull { c ->
+            val line = c as? Map<*, *> ?: return@mapNotNull null
+            val text = line["text"] as? String ?: return@mapNotNull null
+            GraineCaption(if (line["role"] == "agent") GraineRole.AGENT else GraineRole.USER, text, line["live"] == true)
+        }
+        return GraineVoiceInfo(
+            connected = o["connected"] == true,
+            connecting = o["connecting"] == true,
+            muted = o["muted"] == true,
+            // A facade from before the switch says nothing: the captions are on.
+            captionsOn = o["captionsOn"] != false,
+            captions = captions,
+        )
     }
 
     /** An event by its name; null for the session (reported as a state) and for any name this build does not know. */

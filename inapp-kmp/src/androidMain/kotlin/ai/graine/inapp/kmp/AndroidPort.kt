@@ -6,6 +6,7 @@ import ai.graine.inapp.GraineCallListener
 import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
 import ai.graine.inapp.GraineCallback
+import ai.graine.inapp.GraineCaption as NativeCaption
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
 import ai.graine.inapp.GraineChatSize as NativeChatSize
 import ai.graine.inapp.GraineChatTurn as NativeChatTurn
@@ -33,6 +34,8 @@ internal interface AndroidPort {
     val installId: String
     val memoryEnabled: Boolean
     val session: SessionConfig?
+    /** The design's tokens for the phone's appearance now, as the contract's JSON (ThemeTokens.toJson); null without a design. */
+    val themeTokensJson: String?
     fun addListener(listener: GraineListener)
 
     fun identify(traits: Map<String, Any?>?, memory: Boolean?)
@@ -40,6 +43,7 @@ internal interface AndroidPort {
     fun forgetMemory(done: GraineCallback<Int>)
     fun memories(done: GraineCallback<List<NativeMemory>>)
     fun setVariables(values: Map<String, Any?>?)
+    fun currentVariables(): Map<String, String>
     fun setScreen(screen: NativeScreen?)
     fun updateField(field: NativeField)
     fun removeField(name: String)
@@ -60,14 +64,23 @@ internal interface AndroidPort {
     val chatConnected: Boolean
     val chatConnecting: Boolean
     val chatFailed: Boolean
+    /** A drop (or a first try that failed) being made again. */
+    val chatReconnecting: Boolean
     val chatTyping: Boolean
+    /** The chat's upcoming calls, soonest first (its card's). */
+    val chatUpcomingCalls: List<NativeScheduledCall>
     fun addChatChangeListener(listener: Runnable)
     /** The user is in the chat, at [size] for this open (null: the app's, then the dashboard's). */
     fun chatOpen(size: NativeChatSize?)
     fun chatConnect()
+    fun chatClear()
     fun chatClose()
     fun chatSend(text: String)
     fun chatNewConversation(done: GraineCallback<Unit>)
+    fun chatRefreshUpcoming()
+    fun chatCancelUpcoming(id: String)
+    /** A component answered, on the conversation that is live (GraineInApp.answerWidget). */
+    fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String)
 
     // Native calls (GraineInApp.calls): the app's one call, whichever agent it is with.
     val callState: NativeCallState
@@ -77,6 +90,10 @@ internal interface AndroidPort {
     val callAgentSpeaking: Boolean
     /** The name of the agent the call in progress is with; null with no call. */
     val callAgentName: String?
+    /** What the call in progress runs on: "webrtc" or "websocket"; null with no call. */
+    val callTransport: String?
+    /** Why the call in progress, which tried WebRTC, runs on the WebSocket; null otherwise. */
+    val callTransportFallbackReason: String?
     fun addCallListener(listener: GraineCallListener)
     fun configureCalls(config: NativeCallsConfig)
     /** A call with this port's agent. */
@@ -92,10 +109,14 @@ internal interface AndroidPort {
     val voiceConnected: Boolean
     val voiceConnecting: Boolean
     val voiceMuted: Boolean
+    val voiceCaptionsOn: Boolean
+    val voiceCaptions: List<NativeCaption>
     fun attachVoice(activity: Activity)
     fun startVoice()
     fun endVoice()
     fun setVoiceMuted(muted: Boolean)
+    fun setVoiceCaptionsOn(on: Boolean)
+    fun clearVoiceCaptions()
 }
 
 /** [AndroidPort] on the real SDK: the agent [g]. */
@@ -104,6 +125,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val installId: String get() = g.installId
     override val memoryEnabled: Boolean get() = g.memoryEnabled
     override val session: SessionConfig? get() = g.session
+    override val themeTokensJson: String? get() = g.themeTokens()?.toJson()?.toString()
     override fun addListener(listener: GraineListener) = g.addListener(listener)
 
     override fun identify(traits: Map<String, Any?>?, memory: Boolean?) = g.identify(traits, memory)
@@ -111,6 +133,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun forgetMemory(done: GraineCallback<Int>) = g.forgetMemory(done)
     override fun memories(done: GraineCallback<List<NativeMemory>>) = g.memories(done)
     override fun setVariables(values: Map<String, Any?>?) = g.setVariables(values)
+    override fun currentVariables(): Map<String, String> = g.currentVariables()
     override fun setScreen(screen: NativeScreen?) = g.setScreen(screen)
     override fun updateField(field: NativeField) = g.updateField(field)
     override fun removeField(name: String) = g.removeField(name)
@@ -131,13 +154,19 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val chatConnected: Boolean get() = g.chat.connected
     override val chatConnecting: Boolean get() = g.chat.connecting
     override val chatFailed: Boolean get() = g.chat.failed
+    override val chatReconnecting: Boolean get() = g.chat.reconnecting
     override val chatTyping: Boolean get() = g.chat.typing
+    override val chatUpcomingCalls: List<NativeScheduledCall> get() = g.chat.upcomingCalls
     override fun addChatChangeListener(listener: Runnable) = g.chat.addChangeListener(listener)
     override fun chatOpen(size: NativeChatSize?) = g.chat.open(size)
     override fun chatConnect() = g.chat.connect()
+    override fun chatClear() = g.chat.clear()
     override fun chatClose() = g.chat.close()
     override fun chatSend(text: String) = g.chat.send(text)
     override fun chatNewConversation(done: GraineCallback<Unit>) = g.chat.newConversation(done)
+    override fun chatRefreshUpcoming() = g.chat.refreshUpcomingCalls()
+    override fun chatCancelUpcoming(id: String) = g.chat.cancelUpcomingCall(id)
+    override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) = g.answerWidget(widgetId, data, summary)
 
     override val callState: NativeCallState get() = g.calls.state
     override val call: GraineCall? get() = g.calls.call
@@ -145,6 +174,8 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val callSpeaker: Boolean get() = g.calls.speaker
     override val callAgentSpeaking: Boolean get() = g.calls.agentSpeaking
     override val callAgentName: String? get() = g.calls.callAgent?.name
+    override val callTransport: String? get() = g.calls.transport
+    override val callTransportFallbackReason: String? get() = g.calls.transportFallbackReason
     override fun addCallListener(listener: GraineCallListener) = g.calls.addListener(listener)
     override fun configureCalls(config: NativeCallsConfig) = g.calls.configure(config)
     override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? =
@@ -159,8 +190,12 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val voiceConnected: Boolean get() = g.voice.connected
     override val voiceConnecting: Boolean get() = g.voice.connecting
     override val voiceMuted: Boolean get() = g.voice.muted
+    override val voiceCaptionsOn: Boolean get() = g.voice.captionsOn
+    override val voiceCaptions: List<NativeCaption> get() = g.voice.captions
     override fun attachVoice(activity: Activity) = g.voice.attach(activity)
     override fun startVoice() = g.voice.start()
     override fun endVoice() = g.voice.end()
     override fun setVoiceMuted(muted: Boolean) = g.voice.setMuted(muted)
+    override fun setVoiceCaptionsOn(on: Boolean) = g.voice.setCaptionsOn(on)
+    override fun clearVoiceCaptions() = g.voice.clearCaptions()
 }

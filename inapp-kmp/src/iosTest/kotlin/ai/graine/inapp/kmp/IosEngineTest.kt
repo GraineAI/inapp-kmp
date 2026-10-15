@@ -37,10 +37,14 @@ class IosEngineTest {
         override fun sessionFailed(message: String) { failures += message }
         override fun event(event: GraineEvent) { events += event }
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) { chat = Triple(turns, status, typing) }
+        var upcoming: List<GraineScheduledCall> = emptyList()
+        override fun upcomingCalls(calls: List<GraineScheduledCall>) { upcoming = calls }
         override fun calls(info: GraineCallInfo) { calls = info }
         override fun callOutcome(outcome: GraineCallOutcome) {}
         override fun incomingCall(call: GraineIncomingCall) {}
         override fun voice(info: GraineVoiceInfo) { voice = info }
+        var theme: GraineThemeTokens? = null
+        override fun theme(tokens: GraineThemeTokens?) { theme = tokens }
     }
 
     companion object {
@@ -192,6 +196,15 @@ class IosEngineTest {
         assertNull(heard.calls?.agent)
         // A call cannot be placed from a test binary with no microphone permission prompt to answer — but it is accepted.
         engine.callsConfigure(GraineCallsConfig(displayName = "Asha", ringTimeoutSeconds = 30))
+        val calls = assertNotNull(GraineObjC.current()).calls
+        assertEquals("auto", calls.callTransport, "an app that never chose has the SDK's default")
+        // The transport survives the facade's configure, which starts from the SDK's defaults.
+        engine.callsConfigure(GraineCallsConfig(displayName = "Asha", callTransport = GraineCallTransport.WEBRTC))
+        spinUntil { calls.callTransport == "webrtc" }
+        assertEquals("webrtc", calls.callTransport)
+        engine.callsConfigure(GraineCallsConfig(displayName = "Asha"))
+        assertEquals("auto", calls.callTransport, "configured again without one: back to the default")
+        assertNull(heard.calls?.transport, "no call, no transport")
         engine.callsDismissMissed()
         engine.voiceSetMuted(true)
         spinUntil { heard.voice?.muted == true }

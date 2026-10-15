@@ -34,6 +34,8 @@ if (localAndroidSdk) {
     includeBuild("../android") {
         dependencySubstitution {
             substitute(module("ai.graine:inapp-android")).using(project(":graine-inapp"))
+            // The opt-in WebRTC module, for an app built against this checkout that adds it.
+            substitute(module("ai.graine:inapp-android-rtc")).using(project(":graine-inapp-rtc"))
         }
     }
 }

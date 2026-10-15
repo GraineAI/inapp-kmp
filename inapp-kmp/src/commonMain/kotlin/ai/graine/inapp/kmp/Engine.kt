@@ -28,6 +28,8 @@ internal interface GraineEngine {
     fun forgetMemory(done: (Result<Int>) -> Unit)
     fun memories(done: (Result<List<GraineMemory>>) -> Unit)
     fun setVariables(values: Map<String, Any?>?)
+    /** Every variable the agent will receive, merged in the platform SDK's precedence order. */
+    fun currentVariables(): Map<String, String>
 
     fun setScreen(screen: GraineScreen?)
     fun updateField(field: GraineField)
@@ -57,6 +59,14 @@ internal interface GraineEngine {
     fun chatClose()
     fun chatSend(text: String)
     fun chatRetry()
+    /** Empty the chat on screen; the conversation and what waits to be sent go on. */
+    fun chatClear()
+    /** Fetch the chat's upcoming calls again. */
+    fun chatRefreshUpcoming()
+    /** Cancel one of the chat's upcoming calls; it leaves the list once Graine has called it off. */
+    fun chatCancelUpcoming(id: String)
+    /** Answer a component the agent drew, on the conversation that is live. */
+    fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String)
     /** A fresh thread: answers once it is done, or with Graine's refusal (the chat then as it was). */
     fun chatNewConversation(done: (Result<Unit>) -> Unit)
 
@@ -74,6 +84,10 @@ internal interface GraineEngine {
     fun voiceStart()
     fun voiceEnd()
     fun voiceSetMuted(muted: Boolean)
+    /** The captions switch: the platform's bar hides its caption while it is off. */
+    fun voiceSetCaptionsOn(on: Boolean)
+    /** Forget what has been said on the call, without ending it. */
+    fun voiceClearCaptions()
 }
 
 /** Where a platform SDK reports. Any thread. */
@@ -83,10 +97,14 @@ internal interface EngineSink {
     fun sessionFailed(message: String)
     fun event(event: GraineEvent)
     fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean)
+    /** The chat's upcoming calls (its card's), soonest first. */
+    fun upcomingCalls(calls: List<GraineScheduledCall>)
     fun calls(info: GraineCallInfo)
     fun callOutcome(outcome: GraineCallOutcome)
     fun incomingCall(call: GraineIncomingCall)
     fun voice(info: GraineVoiceInfo)
+    /** The brand's design tokens for the device's appearance now; null before the session and without a design. */
+    fun theme(tokens: GraineThemeTokens?)
 }
 
 /** The platform's engine for the agent [name], over its native SDK. */

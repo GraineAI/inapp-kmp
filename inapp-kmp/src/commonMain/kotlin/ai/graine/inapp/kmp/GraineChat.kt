@@ -121,6 +121,14 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     val typing: StateFlow<Boolean> = agent.chatTyping.asStateFlow()
 
     /**
+     * This user's calls still to come, soonest first, at most three — what the
+     * SDK's chat window shows on its Upcoming calls card. Fetched when the chat
+     * opens and after the agent finishes a reply (it may have just booked
+     * one), only where Graine rings this app; empty otherwise.
+     */
+    val upcomingCalls: StateFlow<List<GraineScheduledCall>> = agent.chatUpcoming.asStateFlow()
+
+    /**
      * The user is in the chat: connect, and stay connected. Ends a call the
      * voice bar holds. A voice bar on screen moves to the chat and draws it at
      * [size] — this open's own, until [close]; null follows
@@ -139,6 +147,34 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
 
     /** Connect now, and send what could not be sent. */
     fun retry() = agent.engine().chatRetry()
+
+    /**
+     * Empty the chat on screen — a new topic, a tidy screen. Only the screen:
+     * the conversation goes on, a message still waiting for the connection is
+     * still sent, and nothing Graine keeps — the conversation that continues,
+     * what the agent remembers — is touched. [newConversation] starts over.
+     * On iOS it needs the GraineInApp of this version (an older one ignores it).
+     */
+    fun clear() = agent.engine().chatClear()
+
+    /**
+     * Answer a component the agent drew ([GraineEvent.Component]) from a UI of
+     * your own, on the conversation that is live — the chat, else the voice
+     * bar's call. [data] is the structured answer, for your webhook; [summary]
+     * the sentence that is the user's turn ("The Creta, please"), without which
+     * the conversation does not move. The SDK's own views answer for
+     * themselves. On iOS it needs the GraineInApp of this version.
+     */
+    fun answerWidget(id: String, data: Map<String, Any?>, summary: String) = agent.engine().answerWidget(id, data, summary)
+
+    /** Fetch [upcomingCalls] again — after booking one elsewhere (the chat refreshes them itself otherwise). */
+    fun refreshUpcomingCalls() = agent.engine().chatRefreshUpcoming()
+
+    /** Cancel one of [upcomingCalls]: it leaves the list once Graine has called it off. */
+    fun cancelUpcomingCall(id: String) {
+        if (id.isBlank()) return
+        agent.engine().chatCancelUpcoming(id)
+    }
 
     /**
      * START A NEW CONVERSATION — a fresh thread, as a support chat offers one.
@@ -162,6 +198,18 @@ data class GraineVoiceInfo(
     val connected: Boolean = false,
     val connecting: Boolean = false,
     val muted: Boolean = false,
+    /**
+     * The captions switch — CC: the SDK's bar shows the line being said only
+     * while it is on. On by default (a caption nobody asked to hide is an
+     * accessibility default). [GraineVoice.setCaptionsOn] moves it.
+     */
+    val captionsOn: Boolean = true,
+    /**
+     * What has been said this call, oldest first — the last 12 turns, a live
+     * one replaced as its words arrive; a new call starts empty. Kept whether
+     * the captions are on or off; [GraineVoice.clearCaptions] forgets them.
+     */
+    val captions: List<GraineCaption> = emptyList(),
 )
 
 /**
@@ -181,4 +229,10 @@ class GraineVoice internal constructor(private val agent: GraineAgent) {
 
     /** Stop sending the user's voice without ending the call. */
     fun setMuted(muted: Boolean) = agent.engine().voiceSetMuted(muted)
+
+    /** Turn the captions on or off ([GraineVoiceInfo.captionsOn]) — for your own CC button. The call goes on. */
+    fun setCaptionsOn(on: Boolean) = agent.engine().voiceSetCaptionsOn(on)
+
+    /** Forget what has been said ([GraineVoiceInfo.captions]) without ending the call. */
+    fun clearCaptions() = agent.engine().voiceClearCaptions()
 }

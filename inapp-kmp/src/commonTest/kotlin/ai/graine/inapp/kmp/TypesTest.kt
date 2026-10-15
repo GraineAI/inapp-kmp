@@ -118,12 +118,12 @@ class TypesTest {
         val on = GraineSchedulingRules(usersCanBook = true, minLeadMinutes = 1, maxDaysAhead = 1)
         val soon = Scheduling.check(now + 59.seconds, now, on)!!
         assertEquals(GraineErrorCode.TooSoon, soon.code)
-        assertEquals("Pick a time at least 1 minute from now.", soon.message)
+        assertEquals("Pick a time at least 1 minute from now", soon.message)
         val past = Scheduling.check(now - 1.minutes, now, on)!!
         assertEquals(GraineErrorCode.TooSoon, past.code)
         val far = Scheduling.check(now + 1.days + 1.seconds, now, on)!!
         assertEquals(GraineErrorCode.TooFar, far.code)
-        assertEquals("Pick a time within the next 1 day.", far.message)
+        assertEquals("Pick a time within 1 day", far.message)
     }
 
     // ── JSON across the bridge ────────────────────────────────────────────

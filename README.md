@@ -7,7 +7,8 @@ rings your user, or your user calls the agent. Graine's native SDKs do the
 work on each platform (the same engine, the same design from the dashboard);
 this library is one API over both.
 
-Integration guide: https://www.graine.ai/docs/in-app/kotlin-multiplatform
+Integration guide: https://www.graine.ai/docs/in-app/kotlin-multiplatform ·
+Every public function and type: https://www.graine.ai/docs/in-app/reference/kotlin-multiplatform
 
 ## Install
 
@@ -18,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.8.0")
-            implementation("ai.graine:inapp-kmp-compose:0.8.0")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.9.0")
+            implementation("ai.graine:inapp-kmp-compose:0.9.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -67,14 +68,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.8.0`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.9.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.8.0'`
-  (or `pod 'GraineInApp', '~> 0.8.0'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.8.0"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.9.0'`
+  (or `pod 'GraineInApp', '~> 0.9.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.9.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -99,8 +100,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.8.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.8.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.9.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.9.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -161,16 +162,17 @@ choice. `memories()` and `forgetMemory()` work from a device the user is using
 
 ```kotlin
 Graine.setScreen(GraineScreen(
-    screen = "kyc_documents",
-    title = "Upload your documents",
-    journey = GraineScreen.Journey("KYC", step = 2, of = 4),
-    fields = listOf(GraineField("pan", label = "PAN", value = pan, status = GraineFieldStatus.INVALID, error = "Not recognised")),
+    screen = "checkout_address",
+    title = "Delivery address",
+    journey = GraineScreen.Journey("Checkout", step = 2, of = 4),
+    fields = listOf(GraineField("postal_code", label = "Postal code", value = postalCode, status = GraineFieldStatus.INVALID, error = "Not recognised")),
 ))
 Graine.updateField(GraineField("otp", status = GraineFieldStatus.EMPTY))   // one field changed
 Graine.removeField("otp")
-Graine.clearScreen("kyc_documents")    // in the screen's teardown: only if it is still the one described
+Graine.clearScreen("checkout_address")    // in the screen's teardown: only if it is still the one described
 Graine.track("otp_retry", mapOf("attempt" to 2))
-Graine.setVariables(mapOf("cart_total" to 1299))
+Graine.setVariables(mapOf("app_version" to "4.2.0"))
+Graine.currentVariables()              // every variable the next conversation carries, merged
 ```
 
 Report real values: they are masked on the device on the way out. Taps on
@@ -199,11 +201,15 @@ GraineChat(Modifier.fillMaxSize(), onClose = { navigator.pop() })    // the SDK'
 ```
 
 Or draw your own from `Graine.chat`: `open()` when the user is in the chat,
-`send(text)`, `close()` when they leave, `retry()`, and the states `turns`
+`send(text)`, `close()` when they leave, `retry()`, `clear()` to empty the screen
+(the conversation goes on), and the states `turns`
 (`GraineChatTurn`: role, text, when, `delivery` for the user's messages,
 `proactive` for the agent's, `live` while words arrive, `restored` and
 `channel` for an earlier conversation's), `status` (idle, connecting, online,
-reconnecting, offline) and `typing`.
+reconnecting, offline), `typing` and `upcomingCalls` (the user's booked calls,
+as the SDK's window shows them: `refreshUpcomingCalls()`, `cancelUpcomingCall(id)`).
+A component the agent drew (`GraineEvent.Component`) that you draw yourself is
+answered with `answerWidget(id, data, summary)`.
 
 **How big the chat opens.** The dashboard sets it per agent (Embed & Widgets →
 Appearance → Chat window → Window size); the app can choose otherwise, for
@@ -249,13 +255,29 @@ Box(Modifier.fillMaxSize()) {
 ```
 
 The bar places and ends the call itself; `Graine.voice` (`start()`, `end()`,
-`setMuted()`, `state`) is there for your own controls.
+`setMuted()`, `setCaptionsOn()`, `clearCaptions()`, and `state` — with `captions` and
+the CC switch `captionsOn`) is there for your own controls.
+
+## The brand's design, for UI of your own
+
+```kotlin
+val t = Graine.theme.value ?: return   // null before the session loads, or without a design
+t.colors.accent                        // "#318CE7"
+t.shape.radius.lg                      // 14.0
+t.font.heading                         // "DM Sans", or "system" for the platform's own
+```
+
+`Graine.theme` (each agent's `theme`) is the design the SDK draws with — `GraineThemeTokens`:
+`colors`, `font`, `shape`, `spacing`, `elevation`, `motion`, `icons`, `glass`, `bubbles`,
+`chrome`, and the chat window's (`chat`) and the call screen's (`call`) tokens — for the
+device's light or dark appearance, or the brand's fixed scheme. It changes when the device
+switches.
 
 ## Calls
 
 ```kotlin
 Graine.calls.configure(GraineCallsConfig(displayName = "Acme Assistant", ringTimeoutSeconds = 30))
-val callId: String? = Graine.calls.startCall(reason = "card_blocked", variables = mapOf("order" to "A-1043"))
+val callId: String? = Graine.calls.startCall(reason = "order_help", variables = mapOf("order" to "A-1043"))
 
 // Collect from app start — outcomes are not replayed:
 scope.launch { Graine.calls.outcomes.collect { o -> log(o.callId, o.outcome, o.reason, o.durationSeconds, o.hosted) } }
@@ -281,6 +303,36 @@ is the in-app one.
 (Workspace settings → In-app calling): with the Android lines above and
 `enableVoIPPushes()` on iOS, the SDK registers the device, rings the calls the
 agent, the user or the dashboard booked, and reports what became of each.
+
+### WebRTC calls
+
+Calls carry their audio over a WebSocket unless the app includes each
+platform's WebRTC module. With it, they carry it over WebRTC: a jitter buffer,
+loss concealment and a connection that holds up better on mobile data. Nothing
+in shared code changes — the ring, the call screen and the outcomes stay the same.
+
+- **Android** — the module beside the Android SDK, at the same version as the
+  `ai.graine:inapp-android` you build on, in the Android app (or `androidMain`):
+  `implementation("ai.graine:inapp-android-rtc:$graineAndroidVersion")`. Its
+  manifest adds `ACCESS_NETWORK_STATE` (a normal permission: nothing is asked)
+  and its R8 rules ship inside it.
+- **iOS** — the `GraineInAppRTC` package (`https://github.com/GraineAI/inapp-ios-rtc`),
+  at the same version as `GraineInApp`, its library added to the app target
+  beside `GraineInApp`; or, with CocoaPods, `pod 'GraineInAppRTC'` beside
+  `pod 'GraineInApp'`, the same way and at the same version. The calls find it
+  by themselves.
+
+`GraineCallsConfig(callTransport = …)` chooses: `GraineCallTransport.AUTO` (the
+default — WebRTC where the module is in the app), `WEBSOCKET` or `WEBRTC`. The
+agent's **In-app call audio** setting in the dashboard can switch WebRTC off for
+every install at once. A call WebRTC cannot set up goes on over the WebSocket
+inside the same call — no second ring, no error — and `Graine.calls.state` says
+which one carried it: `transport` (`WEBRTC` or `WEBSOCKET`) and
+`transportFallbackReason` (`no_answer`, `ice_timeout`, …). Over WebRTC the
+agent's voice arrives at telephone bandwidth today. Size, per phone: about
+12 MB installed on an iPhone, about 7.4 MB on a 64-bit Android phone. WebRTC is
+BSD 3-Clause with Google's patent grant — list it in your app's open-source
+licences.
 
 ## Scheduled calls
 
@@ -308,7 +360,7 @@ itself — "Call me at…" with no screen of your own, from shared code:
 
 ```kotlin
 if (Graine.bookingAvailable) {                         // rung here, booking on, the user identified
-    val call: GraineScheduledCall? = Graine.presentBooking(reason = "Card replacement")
+    val call: GraineScheduledCall? = Graine.presentBooking(reason = "Talk through my order")
     if (call != null) showBooked(call)                 // null: closed without booking
 }
 ```
@@ -385,8 +437,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.8.0 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.8.0 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.9.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.9.0 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

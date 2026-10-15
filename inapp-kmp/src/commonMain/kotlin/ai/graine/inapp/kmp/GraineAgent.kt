@@ -55,10 +55,21 @@ class GraineAgent internal constructor(
     internal val chatTurns = MutableStateFlow<List<GraineChatTurn>>(emptyList())
     internal val chatStatus = MutableStateFlow(GraineChatStatus.IDLE)
     internal val chatTyping = MutableStateFlow(false)
+    internal val chatUpcoming = MutableStateFlow<List<GraineScheduledCall>>(emptyList())
     internal val voiceInfo = MutableStateFlow(GraineVoiceInfo())
+    internal val themeState = MutableStateFlow<GraineThemeTokens?>(null)
 
     /** This agent's configuration, once it has loaded; null before. */
     val session: StateFlow<GraineSession?> = sessionState.asStateFlow()
+
+    /**
+     * THIS AGENT'S DESIGN TOKENS, for UI of your own — the brand's colours,
+     * type, corners, depth, motion and icons, for the device's light or dark
+     * appearance (or the brand's fixed scheme), changing when the device
+     * switches. Null before the session loads, and when it carries no design.
+     * On iOS it needs GraineInApp of this version.
+     */
+    val theme: StateFlow<GraineThemeTokens?> = themeState.asStateFlow()
 
     /** Everything this agent reports that is not a state. Not replayed. */
     val events: SharedFlow<GraineEvent> = eventFlow.asSharedFlow()
@@ -90,6 +101,15 @@ class GraineAgent internal constructor(
 
     /** Prompt variables from the app's own data, for this agent. Merged; null under a key removes it, null clears all. */
     fun setVariables(values: Map<String, Any?>?) = engine().setVariables(values)
+
+    /**
+     * EVERY VARIABLE THIS AGENT WILL RECEIVE, merged in precedence order: the
+     * dashboard's defaults, the config's `variables`, [setVariables], then who
+     * is signed in (`identify`, its identity trait withheld) — what the next
+     * conversation carries, masked as it leaves the device. A copy. On iOS it
+     * needs GraineInApp of this version (an older one answers empty).
+     */
+    fun currentVariables(): Map<String, String> = engine().currentVariables()
 
     /**
      * Something this agent can do in your app. Declare it on the agent in the
@@ -233,6 +253,10 @@ class GraineAgent internal constructor(
             chatTyping.value = typing
         }
 
+        override fun upcomingCalls(calls: List<GraineScheduledCall>) {
+            chatUpcoming.value = calls
+        }
+
         // The phone has one call engine: one agent reports it for the app (Graine.calls).
         override fun calls(info: GraineCallInfo) = Graine.callsReported(this@GraineAgent) { Graine.callInfo.value = info }
         override fun callOutcome(outcome: GraineCallOutcome) = Graine.callsReported(this@GraineAgent) { Graine.callOutcomes.tryEmit(outcome) }
@@ -240,6 +264,10 @@ class GraineAgent internal constructor(
 
         override fun voice(info: GraineVoiceInfo) {
             voiceInfo.value = info
+        }
+
+        override fun theme(tokens: GraineThemeTokens?) {
+            themeState.value = tokens
         }
     }
 
@@ -252,7 +280,9 @@ class GraineAgent internal constructor(
         chatTurns.value = emptyList()
         chatStatus.value = GraineChatStatus.IDLE
         chatTyping.value = false
+        chatUpcoming.value = emptyList()
         voiceInfo.value = GraineVoiceInfo()
+        themeState.value = null
     }
 }
 

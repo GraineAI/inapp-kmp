@@ -21,7 +21,7 @@ import java.util.Date
  * The Android SDK reports in WIRE.md's types already (chat turns, booked calls,
  * errors, a call's outcome with why, how long and whether Graine rang it);
  * what is added here: `ringing` as an outcome when a ring starts, the chat's
- * connection as one word ([ChatInference.status]), the last missed ring, for
+ * connection as one word ([ChatInference.status], from its flags), the last missed ring, for
  * "Call back", and the agent each call is with, kept past the call (the
  * Android SDK names it only for the call in progress).
  */
@@ -36,6 +36,8 @@ internal class AndroidEngine(
     /** The main thread, where the Android SDK's calls and chat want to be driven. */
     private val onMain: (() -> Unit) -> Unit = { AndroidHost.onMain(it) },
     private val onMainSync: (() -> String?) -> String? = { AndroidHost.onMainSync(it) },
+    /** Calls back whenever the phone's configuration changes — light and dark among it. */
+    private val watchAppearance: (() -> Unit) -> Unit = { changed -> AndroidHost.watchConfiguration(changed) },
 ) : GraineEngine {
 
     private lateinit var sink: EngineSink
@@ -46,7 +48,6 @@ internal class AndroidEngine(
     private val callAgents = HashMap<String, String>()
     private var caption: GraineCaption? = null
     private var missed: GraineMissedCall? = null
-    private var chatStatus = GraineChatStatus.IDLE
 
     override val installId: String get() = port.installId
     override val memoryEnabled: Boolean get() = port.memoryEnabled
@@ -58,6 +59,9 @@ internal class AndroidEngine(
         port.addChatChangeListener(Runnable { publishChat() })
         // The Android SDK may have been started by the app before (or loaded its session already).
         port.session?.let { sink.session(AndroidMapping.session(it)) }
+        // The design's tokens follow the phone between light and dark.
+        watchAppearance { publishTheme() }
+        publishTheme()
         publishChat()
         publishCalls()
         publishVoice()
@@ -78,6 +82,7 @@ internal class AndroidEngine(
     }
 
     override fun setVariables(values: Map<String, Any?>?) = port.setVariables(values)
+    override fun currentVariables(): Map<String, String> = port.currentVariables()
 
     // ── the screen ────────────────────────────────────────────────────────
 
@@ -136,14 +141,19 @@ internal class AndroidEngine(
     override fun chatClose() = onMain { port.chatClose() }
     override fun chatSend(text: String) = port.chatSend(text)
     override fun chatRetry() = onMain { port.chatConnect() }
+    override fun chatClear() = onMain { port.chatClear() }
+    override fun chatRefreshUpcoming() = onMain { port.chatRefreshUpcoming() }
+    override fun chatCancelUpcoming(id: String) = onMain { port.chatCancelUpcoming(id) }
+    override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) = onMain { port.answerWidget(widgetId, data, summary) }
 
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) = port.chatNewConversation { _, error ->
         if (error != null) done(Result.failure(AndroidMapping.error(error))) else done(Result.success(Unit))
     }
 
     private fun publishChat() {
-        chatStatus = ChatInference.status(port.chatConnected, port.chatConnecting, port.chatFailed, chatStatus)
-        sink.chat(port.chatTurns.map { AndroidMapping.turn(it) }, chatStatus, port.chatTyping)
+        val status = ChatInference.status(port.chatConnected, port.chatConnecting, port.chatFailed, port.chatReconnecting)
+        sink.chat(port.chatTurns.map { AndroidMapping.turn(it) }, status, port.chatTyping)
+        sink.upcomingCalls(port.chatUpcomingCalls.map { AndroidMapping.scheduledCall(it) })
     }
 
     // ── native calls ──────────────────────────────────────────────────────
@@ -196,6 +206,8 @@ internal class AndroidEngine(
                 caption = caption.takeIf { state != GraineCallState.IDLE },
                 missedCall = missed,
                 agent = port.callAgentName.takeIf { c != null },
+                transport = GraineCallTransport.ofCall(port.callTransport).takeIf { c != null },
+                transportFallbackReason = port.callTransportFallbackReason.takeIf { c != null },
             )
         )
     }
@@ -275,12 +287,33 @@ internal class AndroidEngine(
         publishVoice()
     }
 
-    private fun publishVoice() = sink.voice(GraineVoiceInfo(port.voiceConnected, port.voiceConnecting, port.voiceMuted))
+    override fun voiceSetCaptionsOn(on: Boolean) = onMain {
+        port.setVoiceCaptionsOn(on)
+        publishVoice()
+    }
+
+    override fun voiceClearCaptions() = onMain {
+        port.clearVoiceCaptions()
+        publishVoice()
+    }
+
+    private fun publishVoice() = sink.voice(
+        GraineVoiceInfo(
+            port.voiceConnected, port.voiceConnecting, port.voiceMuted, port.voiceCaptionsOn,
+            port.voiceCaptions.map { GraineCaption(AndroidMapping.role(it.role), it.text, it.live) },
+        )
+    )
 
     // ── what the SDK reports ──────────────────────────────────────────────
 
+    /** The tokens the Android SDK draws with now, read again on a session and on a light/dark switch. */
+    private fun publishTheme() = sink.theme(ThemeBridge.parse(port.themeTokensJson))
+
     private val listener = object : GraineListener {
-        override fun onSessionReady(session: SessionConfig) = sink.session(AndroidMapping.session(session))
+        override fun onSessionReady(session: SessionConfig) {
+            sink.session(AndroidMapping.session(session))
+            publishTheme()
+        }
 
         override fun onCallState(connected: Boolean, connecting: Boolean) = publishVoice()
 

@@ -110,6 +110,24 @@ class BridgeTest {
             chat.turns,
         )
         assertEquals(Bridge.Chat(emptyList(), GraineChatStatus.IDLE, false), Bridge.chat(null))
+        assertTrue(chat.upcoming.isEmpty(), "a facade from before the upcoming calls says nothing of them")
+    }
+
+    @Test
+    fun theChatsUpcomingCallsRideItsSnapshot() {
+        val chat = Bridge.chat(
+            """{"turns":[],"status":"online","typing":false,
+                "upcomingCalls":[{"id":"sc_1","at":1760617800000,"status":"scheduled","source":"agent","reason":"Your delivery"},
+                                 {"id":"","at":1},{"at":2},"junk",{"id":"sc_2","at":null,"status":"ringing","source":null,"reason":null}]}"""
+        )
+        assertEquals(
+            listOf(
+                GraineScheduledCall("sc_1", Instant.fromEpochMilliseconds(1760617800000), GraineCallStatus.Scheduled, GraineCallSource.Agent, "Your delivery"),
+                GraineScheduledCall("sc_2", null, GraineCallStatus.Ringing, null, null),
+            ),
+            chat.upcoming,
+            "a call without an id, or not a call at all, is skipped",
+        )
     }
 
     @Test
@@ -151,6 +169,24 @@ class BridgeTest {
     }
 
     @Test
+    fun theCallSaysWhatItsAudioRunsOnAndWhyItFellBack() {
+        val onWebRtc = Bridge.calls("""{"state":"active","callId":"c1","transport":"webrtc","transportFallbackReason":null}""")
+        assertEquals(GraineCallTransport.WEBRTC, onWebRtc.transport)
+        assertNull(onWebRtc.transportFallbackReason)
+        val fellBack = Bridge.calls("""{"state":"active","callId":"c1","transport":"websocket","transportFallbackReason":"ice_timeout"}""")
+        assertEquals(GraineCallTransport.WEBSOCKET, fellBack.transport)
+        assertEquals("ice_timeout", fellBack.transportFallbackReason)
+        assertNull(Bridge.calls("""{"state":"active","transport":"auto"}""").transport, "a call runs on webrtc or websocket, never on auto")
+        assertNull(Bridge.calls("""{"state":"active"}""").transport, "an iOS SDK that predates WebRTC says nothing")
+    }
+
+    @Test
+    fun theTransportsAreTheirWords() {
+        assertEquals(listOf("auto", "websocket", "webrtc"), GraineCallTransport.entries.map { it.wire })
+        assertEquals(GraineCallTransport.AUTO, GraineCallsConfig().callTransport)
+    }
+
+    @Test
     fun outcomesAndRingsAreReadWhole() {
         assertEquals(
             GraineCallOutcome("c1", GraineCallOutcome.Kind.ENDED, "local", 63, true),
@@ -167,6 +203,18 @@ class BridgeTest {
         assertEquals("default", Bridge.outcome("""{"callId":"c5","outcome":"ringing","hosted":true,"agent":"default"}""")?.agent)
         assertNull(Bridge.outcome("""{"callId":"c5","outcome":"ringing","agent":""}""")?.agent, "blank is not a name")
         assertEquals(GraineVoiceInfo(connected = true, connecting = false, muted = true), Bridge.voice("""{"connected":true,"muted":true}"""))
+        assertTrue(Bridge.voice("""{"connected":true}""").captionsOn, "a facade from before the switch: the captions are on")
+        assertEquals(
+            GraineVoiceInfo(
+                connected = true, captionsOn = false,
+                captions = listOf(GraineCaption(GraineRole.USER, "What does it cost?", false), GraineCaption(GraineRole.AGENT, "It costs", true)),
+            ),
+            Bridge.voice(
+                """{"connected":true,"captionsOn":false,"captions":[{"role":"user","text":"What does it cost?","live":false},
+                    {"role":"agent","text":"It costs","live":true},{"role":"agent"},"junk"]}"""
+            ),
+            "a line with no words, or not a line, is skipped",
+        )
     }
 
     @Test
@@ -218,14 +266,13 @@ class BridgeTest {
     }
 
     @Test
-    fun aConnectAfterBeingOnlineIsAReconnect() {
-        val s = GraineChatStatus.IDLE
-        assertEquals(GraineChatStatus.CONNECTING, ChatInference.status(connected = false, connecting = true, failed = false, previous = s))
-        assertEquals(GraineChatStatus.ONLINE, ChatInference.status(true, false, false, GraineChatStatus.CONNECTING))
-        assertEquals(GraineChatStatus.RECONNECTING, ChatInference.status(false, true, false, GraineChatStatus.ONLINE))
-        assertEquals(GraineChatStatus.RECONNECTING, ChatInference.status(false, true, false, GraineChatStatus.RECONNECTING))
-        assertEquals(GraineChatStatus.OFFLINE, ChatInference.status(false, false, true, GraineChatStatus.RECONNECTING))
-        assertEquals(GraineChatStatus.IDLE, ChatInference.status(false, false, false, GraineChatStatus.ONLINE))
+    fun theFlagsAreOneWordAndTheSdksReconnectingNamesARemake() {
+        assertEquals(GraineChatStatus.CONNECTING, ChatInference.status(connected = false, connecting = true, failed = false, reconnecting = false))
+        assertEquals(GraineChatStatus.RECONNECTING, ChatInference.status(connected = false, connecting = true, failed = false, reconnecting = true))
+        assertEquals(GraineChatStatus.ONLINE, ChatInference.status(true, false, false, false))
+        assertEquals(GraineChatStatus.OFFLINE, ChatInference.status(false, false, true, false))
+        assertEquals(GraineChatStatus.IDLE, ChatInference.status(false, false, false, false))
+        assertEquals(GraineChatStatus.IDLE, ChatInference.status(false, false, false, true), "not connecting is never reconnecting")
     }
 
     @Test

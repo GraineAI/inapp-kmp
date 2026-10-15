@@ -115,6 +115,9 @@ object Graine {
     /** The default agent's configuration, once it has loaded; null before. */
     val session: StateFlow<GraineSession?> get() = defaultAgent.session
 
+    /** The default agent's design tokens, for UI of your own. See [GraineAgent.theme]. */
+    val theme: StateFlow<GraineThemeTokens?> get() = defaultAgent.theme
+
     /** Everything the default agent reports that is not a state. Not replayed. */
     val events: SharedFlow<GraineEvent> get() = defaultAgent.events
 
@@ -132,6 +135,9 @@ object Graine {
 
     /** The default agent's prompt variables. See [GraineAgent.setVariables]. */
     fun setVariables(values: Map<String, Any?>?) = defaultAgent.setVariables(values)
+
+    /** Every variable the default agent will receive, merged. See [GraineAgent.currentVariables]. */
+    fun currentVariables(): Map<String, String> = defaultAgent.currentVariables()
 
     /** An action for the default agent. See [GraineAgent.registerAction]. */
     fun registerAction(name: String, handler: suspend (args: Map<String, Any?>) -> GraineActionResult): () -> Unit =

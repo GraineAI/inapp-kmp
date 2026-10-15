@@ -27,11 +27,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)close;
 - (void)send:(NSString *)text;
 - (void)retry;
+- (void)clear;
+- (void)answerWidgetWithId:(NSString *)widgetId dataJSON:(nullable NSString *)dataJSON summary:(NSString *)summary;
+- (void)refreshUpcomingCalls;
+- (void)cancelUpcomingCall:(NSString *)callId;
 - (GraineObjCRegistration *)observe:(void (^)(void))observer;
 @end
 
 @interface GraineObjCCalls : NSObject
 @property (nonatomic, readonly) NSString *snapshotJSON;
+@property (nonatomic, copy) NSString *callTransport;
+@property (nonatomic, readonly, nullable) NSString *transport;
+@property (nonatomic, readonly, nullable) NSString *transportFallbackReason;
 - (void)configureWithDisplayName:(NSString *)displayName ringtoneSound:(nullable NSString *)ringtoneSound ringTimeout:(double)ringTimeout includesCallsInRecents:(BOOL)includesCallsInRecents;
 - (void)enableVoIPPushes;
 - (nullable NSString *)startCallJSONWithReason:(nullable NSString *)reason variablesJSON:(nullable NSString *)variablesJSON;
@@ -53,6 +60,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)start;
 - (void)end;
 - (void)setMuted:(BOOL)muted;
+- (void)setCaptionsOn:(BOOL)on;
+- (void)clearCaptions;
 - (GraineObjCRegistration *)observe:(void (^)(void))observer;
 @end
 
@@ -67,6 +76,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) NSString *installId;
 @property (nonatomic, readonly) BOOL memoryChoice;
 @property (nonatomic, readonly, nullable) NSString *sessionJSON;
+@property (nonatomic, readonly, nullable) NSString *themeJSON;
+@property (nonatomic, readonly) NSString *currentVariablesJSON;
 @property (nonatomic, readonly) GraineObjCChat *chat;
 @property (nonatomic, readonly) GraineObjCCalls *calls;
 @property (nonatomic, readonly) GraineObjCVoice *voice;

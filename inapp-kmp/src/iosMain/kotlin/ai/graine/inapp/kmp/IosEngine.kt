@@ -33,6 +33,7 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         registrations += facade.voice.observe { publishVoice() }
         // The iOS SDK may have loaded its session already (the app configured it from Swift first).
         Bridge.session(facade.sessionJSON)?.let { sink.session(it) }
+        publishTheme()
         publishChat()
         publishCalls()
         publishVoice()
@@ -41,13 +42,23 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     private fun onEvent(name: String?, json: String?) {
         when (name) {
             null -> Unit
-            "sessionReady" -> Bridge.session(json)?.let { sink.session(it) }
+            "sessionReady" -> {
+                Bridge.session(json)?.let { sink.session(it) }
+                publishTheme()
+            }
+            // The design's tokens changed: the session arrived, or the device switched light and dark.
+            "theme" -> publishTheme()
             else -> {
                 // Before any session, an error is the session failing to load: a booking stops waiting for it.
                 if (name == "error" && facade.sessionJSON == null) sink.sessionFailed(Json.obj(json)?.get("message") as? String ?: "")
                 Bridge.event(name, json)?.let { sink.event(it) }
             }
         }
+    }
+
+    /** The facade's `themeJSON`, new after 0.8.0: with a GraineInApp from before it there are no tokens to read. */
+    private fun publishTheme() {
+        if (facade.respondsToSelector(THEME_JSON)) sink.theme(ThemeBridge.parse(facade.themeJSON))
     }
 
     // ── who, and memory ───────────────────────────────────────────────────
@@ -68,6 +79,12 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     }
 
     override fun setVariables(values: Map<String, Any?>?) = facade.setVariablesJSON(Bridge.json(values))
+
+    /** The facade's `currentVariablesJSON`, new after 0.8.0: an older GraineInApp has none to read, and answers empty. */
+    override fun currentVariables(): Map<String, String> {
+        if (!facade.respondsToSelector(CURRENT_VARIABLES)) return emptyMap()
+        return Json.obj(facade.currentVariablesJSON).orEmpty().mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+    }
 
     // ── the screen ────────────────────────────────────────────────────────
 
@@ -134,6 +151,24 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun chatSend(text: String) = facade.chat.send(text)
     override fun chatRetry() = facade.chat.retry()
 
+    /** The facade's `clear`, new after 0.8.0: a GraineInApp from before it has nothing to clear with, and is left alone. */
+    override fun chatClear() {
+        if (facade.chat.respondsToSelector(CHAT_CLEAR)) facade.chat.clear()
+    }
+
+    // The upcoming calls ride the chat's snapshot; refreshing, cancelling and answering are new after 0.8.0 too.
+    override fun chatRefreshUpcoming() {
+        if (facade.chat.respondsToSelector(REFRESH_UPCOMING)) facade.chat.refreshUpcomingCalls()
+    }
+
+    override fun chatCancelUpcoming(id: String) {
+        if (facade.chat.respondsToSelector(CANCEL_UPCOMING)) facade.chat.cancelUpcomingCall(id)
+    }
+
+    override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) {
+        if (facade.chat.respondsToSelector(ANSWER_WIDGET)) facade.chat.answerWidgetWithId(widgetId, Bridge.json(data.takeIf { it.isNotEmpty() }), summary)
+    }
+
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) = facade.chat.newConversationWithCompletion { error ->
         if (error != null) done(Result.failure(failure(error))) else done(Result.success(Unit))
     }
@@ -141,13 +176,18 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     private fun publishChat() {
         val chat = Bridge.chat(facade.chat.snapshotJSON)
         sink.chat(chat.turns, chat.status, chat.typing)
+        sink.upcomingCalls(chat.upcoming)
     }
 
     // ── native calls ──────────────────────────────────────────────────────
 
-    override fun callsConfigure(config: GraineCallsConfig) = facade.calls.configureWithDisplayName(
-        config.displayName, config.ringtone, config.ringTimeoutSeconds.toDouble(), config.includeInRecents,
-    )
+    override fun callsConfigure(config: GraineCallsConfig) {
+        facade.calls.configureWithDisplayName(
+            config.displayName, config.ringtone, config.ringTimeoutSeconds.toDouble(), config.includeInRecents,
+        )
+        // After it: the facade's configure starts from the SDK's defaults (auto), and the transport goes on top.
+        if (config.callTransport != GraineCallTransport.AUTO) facade.calls.callTransport = config.callTransport.wire
+    }
 
     override fun callsEnableVoIPPushes() = facade.calls.enableVoIPPushes()
 
@@ -170,12 +210,30 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun voiceEnd() = facade.voice.end()
     override fun voiceSetMuted(muted: Boolean) = facade.voice.setMuted(muted)
 
+    // The captions switch is new after 0.8.0: an older GraineInApp keeps its captions on, as it always did.
+    override fun voiceSetCaptionsOn(on: Boolean) {
+        if (facade.voice.respondsToSelector(SET_CAPTIONS_ON)) facade.voice.setCaptionsOn(on)
+    }
+
+    override fun voiceClearCaptions() {
+        if (facade.voice.respondsToSelector(CLEAR_CAPTIONS)) facade.voice.clearCaptions()
+    }
+
     private fun publishVoice() = sink.voice(Bridge.voice(facade.voice.snapshotJSON))
 
     companion object {
         // The booking sheet's selectors, new in the facade after 0.7.0 (asked for before each use).
         private val BOOKING_AVAILABLE = NSSelectorFromString("bookingAvailable")
         private val PRESENT_BOOKING = NSSelectorFromString("presentBookingWithReason:completion:")
+        // New in the facade after 0.8.0 (asked for before each use).
+        private val CHAT_CLEAR = NSSelectorFromString("clear")
+        private val REFRESH_UPCOMING = NSSelectorFromString("refreshUpcomingCalls")
+        private val CANCEL_UPCOMING = NSSelectorFromString("cancelUpcomingCall:")
+        private val ANSWER_WIDGET = NSSelectorFromString("answerWidgetWithId:dataJSON:summary:")
+        private val THEME_JSON = NSSelectorFromString("themeJSON")
+        private val CURRENT_VARIABLES = NSSelectorFromString("currentVariablesJSON")
+        private val SET_CAPTIONS_ON = NSSelectorFromString("setCaptionsOn:")
+        private val CLEAR_CAPTIONS = NSSelectorFromString("clearCaptions")
         private val OLD_IOS_SDK =
             "This app links a GraineInApp without the booking sheet. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
 
