@@ -161,7 +161,7 @@ internal class AndroidEngine(
     override fun callsConfigure(config: GraineCallsConfig) =
         port.configureCalls(AndroidMapping.callsConfig(config, appName(), ringtone))
 
-    /** Android rings from the messaging service's data messages ([PlatformPush]); nothing to enable. */
+    /** Android rings from Firebase data messages — the SDK's own messaging service, or an app's through [PlatformPush]; nothing to enable. */
     override fun callsEnableVoIPPushes() = Unit
 
     override fun callsStart(reason: String?, variables: Map<String, Any?>): String? = onMainSync start@{

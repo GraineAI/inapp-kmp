@@ -220,9 +220,13 @@ data class GraineCallsConfig(
  *
  * Graine rings your users itself once your push credentials are uploaded
  * (Workspace settings → In-app calling): on iOS call [enableVoIPPushes] at
- * every launch; on Android forward your messaging service's token and data
- * messages to [onNewToken] and [handlePush]. The SDK registers the device,
- * rings the calls Graine sends and reports what became of each.
+ * every launch; on Android add Firebase Cloud Messaging to the app
+ * (google-services.json, the Google services plugin, firebase-messaging) and
+ * the SDK registers for pushes itself — its own messaging service receives the
+ * calls, and it reads the push token at start. An app with a
+ * FirebaseMessagingService of its own forwards from it to [onNewToken] and
+ * [handlePush]. The SDK registers the device, rings the calls Graine sends and
+ * reports what became of each.
  *
  * PERMISSIONS AND SETUP: [requestCallPermissions] asks when the app chooses
  * (never on its own at launch; a call that starts without the microphone
@@ -250,7 +254,9 @@ class GraineCalls internal constructor() {
      * iOS: receive the agent's calls as VoIP pushes — call at every launch
      * (iOS wakes a closed app for a VoIP push and hands it over once this has
      * run). The SDK registers the token with Graine when Graine rings this app.
-     * Android: nothing to do here (see [onNewToken] and [handlePush]).
+     * Android: nothing to do here — with Firebase in the app the SDK registers
+     * for pushes itself ([onNewToken] and [handlePush] are for an app with a
+     * messaging service of its own).
      */
     fun enableVoIPPushes() = Graine.callsEngine().callsEnableVoIPPushes()
 
@@ -319,27 +325,34 @@ class GraineCalls internal constructor() {
      * What the app's setup still lacks for calls, read now — each a stable
      * code and a sentence with the exact fix. iOS: an Info.plist entry or
      * background mode, the push entitlement, [enableVoIPPushes] never called
-     * or no VoIP token. Android: a manifest entry, no push token
-     * ([onNewToken]), notifications or the full-screen ring not allowed.
+     * or no VoIP token. Android: a manifest entry, no push token (Firebase
+     * missing or not set up in the app, or [onNewToken] never called by an app
+     * with its own messaging service), notifications or the full-screen ring
+     * not allowed.
      * Both: the microphone blocked, Graine not ringing this phone. Empty when
      * nothing is missing. Calls still work where they can.
      */
     val callSetupProblems: List<GraineCallSetupProblem> get() = Graine.callsEngine().callsSetupProblems()
 
     /**
-     * Android: your FirebaseMessagingService's new token — one line,
+     * Android, only for an app with a FirebaseMessagingService of its own
+     * (which outranks the SDK's and receives every token) — one line,
      * `override fun onNewToken(token: String) = Graine.calls.onNewToken(token)`.
-     * Kept and registered with Graine when Graine rings this app. Works before
-     * [Graine.configure], as a messaging service may start first.
+     * Otherwise the SDK's own messaging service receives each new token, and
+     * the SDK reads the current one at start. Kept and registered with Graine
+     * when Graine rings this app. Works before [Graine.configure], as a
+     * messaging service may start first.
      * iOS: does nothing — the VoIP token comes from PushKit ([enableVoIPPushes]).
      */
     fun onNewToken(token: String) = PlatformPush.onNewToken(token)
 
     /**
-     * Android: hand every FCM data message here first, from your
-     * FirebaseMessagingService — `if (Graine.calls.handlePush(message.data)) return`.
-     * True when it was a call (Graine's own ring, or one your server sent), which
-     * the SDK rings; false when it is one of your own messages.
+     * Android, only for an app with a FirebaseMessagingService of its own
+     * (which outranks the SDK's and receives every message): hand every FCM
+     * data message here first — `if (Graine.calls.handlePush(message.data)) return`.
+     * Otherwise the SDK's own messaging service does it. True when it was a
+     * call (Graine's own ring, or one your server sent), which the SDK rings;
+     * false when it is one of your own messages.
      * iOS: always false — a VoIP push reaches PushKit, and the SDK, by itself.
      */
     fun handlePush(data: Map<String, String>): Boolean = PlatformPush.handlePush(data)

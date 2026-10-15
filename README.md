@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.10.0")
-            implementation("ai.graine:inapp-kmp-compose:0.10.0")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.10.1")
+            implementation("ai.graine:inapp-kmp-compose:0.10.1")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -34,12 +34,19 @@ every request is refused.
 ### Android
 
 Android 7.0 (API 24) and up. The Android SDK (`ai.graine:inapp-android`) comes
-with it, and its manifest brings the permissions, the call screen and the
-call service; there is nothing to copy. The library finds your application by
-itself, so `Graine.configure(config)` works from shared code.
+with it, and its manifest brings the permissions, the call screen, the call
+service and a Firebase messaging service; there is nothing to copy. The library
+finds your application by itself, so `Graine.configure(config)` works from
+shared code.
 
-For calls, two lines in your `FirebaseMessagingService` (the SDK does not
-depend on Firebase):
+For calls that ring, add Firebase to your Android app — `google-services.json`,
+the Google services Gradle plugin and `com.google.firebase:firebase-messaging` —
+and the SDK registers for pushes itself: its own messaging service receives the
+token and Graine's calls, and it reads the current token at start. The SDK does
+not depend on Firebase.
+
+Already have your own `FirebaseMessagingService`? It outranks the SDK's and
+receives every message, so hand Graine's over — two lines:
 
 ```kotlin
 class Messaging : FirebaseMessagingService() {
@@ -68,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.10.0`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.10.1`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.10.0'`
-  (or `pod 'GraineInApp', '~> 0.10.0'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.10.0"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.10.1'`
+  (or `pod 'GraineInApp', '~> 0.10.1'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.10.1"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -100,8 +107,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.10.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.10.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.10.1 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.10.1 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -465,8 +472,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.10.0 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.10.0 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.10.1 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.10.1 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

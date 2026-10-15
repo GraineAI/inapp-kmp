@@ -1,3 +1,7 @@
+## 0.10.1
+
+- **On Android the SDK registers for pushes itself: no `FirebaseMessagingService` to write.** With Firebase Cloud Messaging in the Android app (`google-services.json`, the Google services plugin and `com.google.firebase:firebase-messaging`), the Android SDK's own messaging service — merged with it — receives every new token and rings Graine's call pushes, and the SDK reads the current token when it starts. Firebase stays optional. An app with its own `FirebaseMessagingService` keeps it: it outranks the SDK's, and hands Graine's pushes over with `Graine.calls.onNewToken(token)` and `Graine.calls.handlePush(message.data)`, as before. Needs the Android SDK of the same release.
+
 ## 0.10.0
 
 - **Call permissions, asked when the app chooses.** `Graine.calls.requestCallPermissions()` (suspending) asks for what the system's dialog can still ask for — the microphone, and notifications on Android 13+ — never on its own at launch; `Graine.calls.callPermissions` reads the microphone, notifications and the full-screen ring (Android 14+), each `GRANTED`, `DENIED`, `BLOCKED` or `NOT_NEEDED`, with `allGranted`; `openCallSettings(GraineCallPermission)` opens the right Settings page. Types: `GraineCallPermission`, `GraineCallPermissionStatus`, `GraineCallPermissions`. On iOS they need GraineInApp of this version.
