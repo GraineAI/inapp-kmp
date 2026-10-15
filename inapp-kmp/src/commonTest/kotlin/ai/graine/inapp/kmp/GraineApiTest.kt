@@ -532,7 +532,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.9.0", GraineKmpVersion.NAME)
+        assertEquals("0.10.0", GraineKmpVersion.NAME)
     }
 
     @Test
@@ -543,5 +543,45 @@ class GraineApiTest {
         assertNull(Graine.session.value)
         assertEquals(GraineVoiceInfo(), Graine.voice.state.value)
         assertFalse(Graine.isConfigured)
+    }
+
+    // ── permissions and setup ─────────────────────────────────────────────
+
+    @Test
+    fun theCallPermissionsAreThePlatformsAndNothingAsksAtConfigure() = runTest {
+        val e = configured()
+        assertFalse("requestCallPermissions" in e.calls, "the app chooses when to ask")
+        assertEquals(GraineCallPermissionStatus.DENIED, Graine.calls.callPermissions.microphone)
+        assertFalse(Graine.calls.callPermissions.allGranted)
+        e.permissionsAfterAsking = GraineCallPermissions(
+            GraineCallPermissionStatus.GRANTED, GraineCallPermissionStatus.NOT_NEEDED, GraineCallPermissionStatus.NOT_NEEDED,
+        )
+        val after = Graine.calls.requestCallPermissions()
+        assertTrue(after.allGranted)
+        assertEquals(GraineCallPermissionStatus.GRANTED, after[GraineCallPermission.MICROPHONE])
+        assertTrue(Graine.calls.openCallSettings(GraineCallPermission.FULL_SCREEN))
+        assertTrue("openCallSettings:fullScreen" in e.calls)
+    }
+
+    @Test
+    fun setupProblemsAreThePlatformsAndCallsBeforeConfigureSayWhatIsMissing() {
+        assertFailsWith<IllegalStateException> { Graine.calls.callPermissions }
+        assertFailsWith<IllegalStateException> { Graine.calls.callSetupProblems }
+        val e = configured()
+        assertTrue(Graine.calls.callSetupProblems.isEmpty())
+        e.setupProblems = listOf(GraineCallSetupProblem("no_push_token", "Hand FCM's token to Graine.calls.onNewToken."))
+        assertEquals("no_push_token", Graine.calls.callSetupProblems.single().code)
+    }
+
+    @Test
+    fun aPermissionsWordIsReadTheSameWayOnEveryPlatform() {
+        assertEquals(GraineCallPermission.FULL_SCREEN, GraineCallPermission.of("full_screen"))
+        assertEquals(GraineCallPermission.NOTIFICATIONS, GraineCallPermission.of("Notifications"))
+        assertNull(GraineCallPermission.of("camera"))
+        assertEquals(GraineCallPermissionStatus.NOT_NEEDED, GraineCallPermissionStatus.of("notNeeded"))
+        assertEquals(GraineCallPermissionStatus.DENIED, GraineCallPermissionStatus.of("maybe"), "never granted by accident")
+        assertEquals(GraineCallPermissionStatus.DENIED, GraineCallPermissionStatus.of(null))
+        assertTrue(GraineCallPermissionStatus.NOT_NEEDED.isSatisfied)
+        assertFalse(GraineCallPermissionStatus.BLOCKED.isSatisfied)
     }
 }

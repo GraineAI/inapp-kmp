@@ -2,6 +2,9 @@ package ai.graine.inapp.kmp
 
 import ai.graine.inapp.ActionResult
 import ai.graine.inapp.GraineCallOutcome as NativeOutcome
+import ai.graine.inapp.GraineCallPermission as NativeCallPermission
+import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
+import ai.graine.inapp.GraineCallSetupProblem as NativeCallSetupProblem
 import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallTransport as NativeCallTransport
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
@@ -165,6 +168,17 @@ internal object AndroidMapping {
      * name is the app's own name ([appName]) — the agent's call name still wins
      * for a call Graine rang, as it does on iOS.
      */
+    /** The Android SDK's permissions, by their words: the same four on every SDK. */
+    fun permissions(p: NativeCallPermissions): GraineCallPermissions = GraineCallPermissions(
+        microphone = GraineCallPermissionStatus.of(p.microphone.wire),
+        notifications = GraineCallPermissionStatus.of(p.notifications.wire),
+        fullScreen = GraineCallPermissionStatus.of(p.fullScreen.wire),
+    )
+
+    fun permission(item: GraineCallPermission): NativeCallPermission = NativeCallPermission.of(item.wire) ?: NativeCallPermission.MICROPHONE
+
+    fun problem(p: NativeCallSetupProblem): GraineCallSetupProblem = GraineCallSetupProblem(p.code, p.message)
+
     fun callsConfig(c: GraineCallsConfig, appName: String?, ringtone: (String) -> android.net.Uri?): NativeCallsConfig = NativeCallsConfig(
         displayName = c.displayName.takeIf { it.isNotBlank() } ?: appName?.takeIf { it.isNotBlank() } ?: "Assistant",
         smallIcon = c.smallIcon,

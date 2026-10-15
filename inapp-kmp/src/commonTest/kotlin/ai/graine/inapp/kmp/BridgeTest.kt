@@ -282,4 +282,18 @@ class BridgeTest {
         assertEquals(2, s.devicesPerUser)
         assertEquals(GraineSchedulingRules(), s.schedulingRules)
     }
+
+    @Test
+    fun theIosFacadesPermissionsAndProblemsAreRead() {
+        assertEquals(
+            GraineCallPermissions(GraineCallPermissionStatus.BLOCKED, GraineCallPermissionStatus.NOT_NEEDED, GraineCallPermissionStatus.NOT_NEEDED),
+            Bridge.permissions("""{"microphone":"blocked","notifications":"notNeeded","fullScreen":"notNeeded"}"""),
+        )
+        assertEquals(GraineCallPermissionStatus.DENIED, Bridge.permissions("not json").microphone, "nothing readable is never granted")
+        assertEquals(
+            listOf(GraineCallSetupProblem("background_voip_missing", "Add voip."), GraineCallSetupProblem("no_voip_token", "")),
+            Bridge.problems("""[{"code":"background_voip_missing","message":"Add voip."},{"code":""},{"code":"no_voip_token"},7]"""),
+        )
+        assertEquals(emptyList<GraineCallSetupProblem>(), Bridge.problems(null))
+    }
 }

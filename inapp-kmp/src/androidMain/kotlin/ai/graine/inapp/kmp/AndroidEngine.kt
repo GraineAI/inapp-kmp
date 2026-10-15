@@ -190,6 +190,18 @@ internal class AndroidEngine(
         publishCalls()
     }
 
+    override fun callsPermissions(): GraineCallPermissions = AndroidMapping.permissions(port.callPermissions)
+
+    /** Over the app's screen in front: the SDK asks from a transparent screen of its own, so no result is forwarded. */
+    override fun callsRequestPermissions(done: (GraineCallPermissions) -> Unit) = onMain {
+        port.requestCallPermissions(frontActivity()) { done(AndroidMapping.permissions(it)) }
+    }
+
+    override fun callsOpenSettings(item: GraineCallPermission): Boolean =
+        port.openCallSettings(AndroidMapping.permission(item), frontActivity())
+
+    override fun callsSetupProblems(): List<GraineCallSetupProblem> = port.callSetupProblems.map { AndroidMapping.problem(it) }
+
     private fun publishCalls() {
         val state = AndroidMapping.callState(port.callState)
         val c = port.call

@@ -80,6 +80,14 @@ internal interface GraineEngine {
     fun callsSetSpeaker(on: Boolean)
     fun callsCallBack(): String?
     fun callsDismissMissed()
+    /** The call permissions as the phone holds them now. */
+    fun callsPermissions(): GraineCallPermissions
+    /** Ask for what the system's dialog can still ask for; [done] gets the permissions after, once. */
+    fun callsRequestPermissions(done: (GraineCallPermissions) -> Unit)
+    /** The Settings page that changes [item]: true when one opened. */
+    fun callsOpenSettings(item: GraineCallPermission): Boolean
+    /** What the app's setup still lacks for calls. */
+    fun callsSetupProblems(): List<GraineCallSetupProblem>
 
     fun voiceStart()
     fun voiceEnd()

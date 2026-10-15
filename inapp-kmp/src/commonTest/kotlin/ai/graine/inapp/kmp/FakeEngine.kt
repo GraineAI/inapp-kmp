@@ -116,6 +116,18 @@ internal class FakeEngine : GraineEngine {
     override fun callsCallBack(): String? { calls += "callBack"; return "call_2" }
     override fun callsDismissMissed() { calls += "dismissMissed" }
 
+    var permissions = GraineCallPermissions(GraineCallPermissionStatus.DENIED, GraineCallPermissionStatus.NOT_NEEDED, GraineCallPermissionStatus.NOT_NEEDED)
+    var permissionsAfterAsking: GraineCallPermissions? = null
+    var setupProblems: List<GraineCallSetupProblem> = emptyList()
+    override fun callsPermissions(): GraineCallPermissions { calls += "callPermissions"; return permissions }
+    override fun callsRequestPermissions(done: (GraineCallPermissions) -> Unit) {
+        calls += "requestCallPermissions"
+        permissionsAfterAsking?.let { permissions = it }
+        done(permissions)
+    }
+    override fun callsOpenSettings(item: GraineCallPermission): Boolean { calls += "openCallSettings:${item.wire}"; return true }
+    override fun callsSetupProblems(): List<GraineCallSetupProblem> { calls += "callSetupProblems"; return setupProblems }
+
     override fun voiceStart() { calls += "voiceStart" }
     override fun voiceEnd() { calls += "voiceEnd" }
     override fun voiceSetMuted(muted: Boolean) { calls += "voiceMuted:$muted" }

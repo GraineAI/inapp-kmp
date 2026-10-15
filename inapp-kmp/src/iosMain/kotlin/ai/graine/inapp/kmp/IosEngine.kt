@@ -202,6 +202,15 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun callsCallBack(): String? = facade.calls.callBack()
     override fun callsDismissMissed() = facade.calls.dismissMissedCall()
 
+    override fun callsPermissions(): GraineCallPermissions = Bridge.permissions(facade.calls.callPermissionsJSON)
+
+    override fun callsRequestPermissions(done: (GraineCallPermissions) -> Unit) =
+        facade.calls.requestCallPermissionsJSONWithCompletion { json -> done(Bridge.permissions(json)) }
+
+    override fun callsOpenSettings(item: GraineCallPermission): Boolean = facade.calls.openCallSettings(item.wire)
+
+    override fun callsSetupProblems(): List<GraineCallSetupProblem> = Bridge.problems(facade.calls.callSetupProblemsJSON)
+
     private fun publishCalls() = sink.calls(Bridge.calls(facade.calls.snapshotJSON))
 
     // ── the voice bar's call ──────────────────────────────────────────────

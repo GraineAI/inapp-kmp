@@ -1,5 +1,6 @@
 package ai.graine.inapp.kmp
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -134,6 +135,68 @@ data class GraineCallInfo(
     val showsCallScreen: Boolean get() = state != GraineCallState.IDLE || missedCall != null
 }
 
+/** A permission a native call needs. [wire] is the word every Graine SDK uses. */
+enum class GraineCallPermission(val wire: String) {
+    /** The user's voice. Asked by the SDK when a call starts without it, or by [GraineCalls.requestCallPermissions]. */
+    MICROPHONE("microphone"),
+    /** A call that rings while the app is closed (Android; 13+ asks). iOS rings through CallKit, which needs none. */
+    NOTIFICATIONS("notifications"),
+    /** A ring that fills a locked screen (Android 14+, allowed in Settings). iOS: CallKit's own screen. */
+    FULL_SCREEN("fullScreen");
+
+    companion object {
+        /** By its word — `microphone`, `notifications`, `fullScreen` (`full_screen` and any case too); null for any other. */
+        fun of(word: String?): GraineCallPermission? {
+            val folded = word?.trim()?.replace("_", "")?.lowercase() ?: return null
+            return entries.firstOrNull { it.wire.lowercase() == folded }
+        }
+    }
+}
+
+/** Where a call permission stands. [wire] is the word every Graine SDK uses. */
+enum class GraineCallPermissionStatus(val wire: String) {
+    /** Allowed. */
+    GRANTED("granted"),
+    /** Not allowed yet: [GraineCalls.requestCallPermissions] can ask for it. */
+    DENIED("denied"),
+    /** Refused for good, or only allowed in Settings: only Settings can change it ([GraineCalls.openCallSettings]). */
+    BLOCKED("blocked"),
+    /** This phone needs no such permission. */
+    NOT_NEEDED("notNeeded");
+
+    /** Granted, or nothing to grant. */
+    val isSatisfied: Boolean get() = this == GRANTED || this == NOT_NEEDED
+
+    companion object {
+        /** From the platform's word; anything it does not know is DENIED, never granted. */
+        fun of(word: String?): GraineCallPermissionStatus = entries.firstOrNull { it.wire == word } ?: DENIED
+    }
+}
+
+/** Every call permission's status, as the phone holds it when read. */
+data class GraineCallPermissions(
+    val microphone: GraineCallPermissionStatus,
+    val notifications: GraineCallPermissionStatus,
+    val fullScreen: GraineCallPermissionStatus,
+) {
+    /** One permission's status. */
+    operator fun get(item: GraineCallPermission): GraineCallPermissionStatus = when (item) {
+        GraineCallPermission.MICROPHONE -> microphone
+        GraineCallPermission.NOTIFICATIONS -> notifications
+        GraineCallPermission.FULL_SCREEN -> fullScreen
+    }
+
+    /** Every permission is granted or not needed: calls can ring and connect. */
+    val allGranted: Boolean get() = GraineCallPermission.entries.all { get(it).isSatisfied }
+}
+
+/**
+ * Something the app's setup still lacks for calls: a stable [code] and a
+ * [message] with the exact fix — the same codes on every Graine SDK. Calls
+ * still work where they can.
+ */
+data class GraineCallSetupProblem(val code: String, val message: String)
+
 /** How native calls look and ring. Set once, at launch: [GraineCalls.configure]. */
 data class GraineCallsConfig(
     /** The name a call rings with and shows, when the push names nobody. Empty: the agent's call name, else the app's name. */
@@ -160,6 +223,12 @@ data class GraineCallsConfig(
  * every launch; on Android forward your messaging service's token and data
  * messages to [onNewToken] and [handlePush]. The SDK registers the device,
  * rings the calls Graine sends and reports what became of each.
+ *
+ * PERMISSIONS AND SETUP: [requestCallPermissions] asks when the app chooses
+ * (never on its own at launch; a call that starts without the microphone
+ * still asks then), [callPermissions] reads them, [openCallSettings] opens
+ * Settings, and [callSetupProblems] says what the app's setup still lacks,
+ * with the fix — each one is also logged once by the platform SDK.
  *
  * One call at a time: a ring while a call is live is reported missed (`busy`).
  * Methods may be called from any thread; [startCall] answers on the spot.
@@ -216,6 +285,46 @@ class GraineCalls internal constructor() {
 
     /** The user has seen the missed call: a call screen can go. */
     fun dismissMissedCall() = Graine.callsEngine().callsDismissMissed()
+
+    /**
+     * The call permissions as the phone holds them now: the microphone, and on
+     * Android the ring's notifications (13+ asks) and the full-screen ring
+     * (14+, Settings only); on iOS those two are NOT_NEEDED — CallKit rings.
+     * Read again when the app returns to the foreground: the user may have
+     * changed Settings. After [Graine.configure].
+     */
+    val callPermissions: GraineCallPermissions get() = Graine.callsEngine().callsPermissions()
+
+    /**
+     * Ask for the call permissions the system's dialog can still ask for — the
+     * microphone, and notifications on Android 13+ — at a moment the app
+     * chooses (onboarding, a "Call me" screen); Android asks over the app's
+     * screen in front. Returns the permissions as they stand after. The
+     * full-screen ring has no dialog: [openCallSettings] opens its page.
+     */
+    suspend fun requestCallPermissions(): GraineCallPermissions {
+        val answer = CompletableDeferred<GraineCallPermissions>()
+        Graine.callsEngine().callsRequestPermissions { answer.complete(it) }
+        return answer.await()
+    }
+
+    /**
+     * Open the Settings page that changes [item] — on Android the full-screen
+     * ring's own page (14+) or the app's notification settings; otherwise the
+     * app's page, where the microphone is. True when a page opened.
+     */
+    fun openCallSettings(item: GraineCallPermission): Boolean = Graine.callsEngine().callsOpenSettings(item)
+
+    /**
+     * What the app's setup still lacks for calls, read now — each a stable
+     * code and a sentence with the exact fix. iOS: an Info.plist entry or
+     * background mode, the push entitlement, [enableVoIPPushes] never called
+     * or no VoIP token. Android: a manifest entry, no push token
+     * ([onNewToken]), notifications or the full-screen ring not allowed.
+     * Both: the microphone blocked, Graine not ringing this phone. Empty when
+     * nothing is missing. Calls still work where they can.
+     */
+    val callSetupProblems: List<GraineCallSetupProblem> get() = Graine.callsEngine().callsSetupProblems()
 
     /**
      * Android: your FirebaseMessagingService's new token — one line,

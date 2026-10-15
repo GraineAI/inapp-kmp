@@ -295,6 +295,24 @@ internal object Bridge {
         return GraineCallOutcome(id, kind, str(o["reason"]), int(o["durationSeconds"]), o["hosted"] == true, str(o["agent"]))
     }
 
+    /** `{microphone, notifications, fullScreen}` from the iOS facade; a word it does not know (or nothing) is DENIED. */
+    fun permissions(json: String?): GraineCallPermissions {
+        val o = Json.obj(json).orEmpty()
+        return GraineCallPermissions(
+            microphone = GraineCallPermissionStatus.of(o["microphone"] as? String),
+            notifications = GraineCallPermissionStatus.of(o["notifications"] as? String),
+            fullScreen = GraineCallPermissionStatus.of(o["fullScreen"] as? String),
+        )
+    }
+
+    /** `[{code, message}]` from the iOS facade; an entry without a code is dropped. */
+    fun problems(json: String?): List<GraineCallSetupProblem> =
+        Json.array(json).orEmpty().mapNotNull { p ->
+            val o = p as? Map<*, *> ?: return@mapNotNull null
+            val code = str(o["code"]) ?: return@mapNotNull null
+            GraineCallSetupProblem(code, o["message"] as? String ?: "")
+        }
+
     fun incoming(json: String?): GraineIncomingCall? {
         val o = Json.obj(json) ?: return null
         val id = str(o["callId"]) ?: return null

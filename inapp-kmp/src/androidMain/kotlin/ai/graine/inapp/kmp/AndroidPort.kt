@@ -3,6 +3,9 @@ package ai.graine.inapp.kmp
 import ai.graine.inapp.ActionResult
 import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallListener
+import ai.graine.inapp.GraineCallPermission as NativeCallPermission
+import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
+import ai.graine.inapp.GraineCallSetupProblem as NativeCallSetupProblem
 import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
 import ai.graine.inapp.GraineCallback
@@ -104,6 +107,13 @@ internal interface AndroidPort {
     fun endCall()
     fun setCallMuted(muted: Boolean)
     fun setCallSpeaker(on: Boolean)
+    /** The call permissions as the phone holds them (GraineCalls.callPermissions). */
+    val callPermissions: NativeCallPermissions
+    /** Ask over [activity] (null: the screen in front, as the SDK finds it); [done] gets the permissions after. */
+    fun requestCallPermissions(activity: Activity?, done: (NativeCallPermissions) -> Unit)
+    fun openCallSettings(item: NativeCallPermission, activity: Activity?): Boolean
+    /** What the app's setup still lacks for calls (GraineCalls.callSetupProblems). */
+    val callSetupProblems: List<NativeCallSetupProblem>
 
     // The agent's voice bar call (GraineInApp.voice).
     val voiceConnected: Boolean
@@ -186,6 +196,11 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun endCall() = g.calls.end()
     override fun setCallMuted(muted: Boolean) = g.calls.setMuted(muted)
     override fun setCallSpeaker(on: Boolean) = g.calls.setSpeaker(on)
+    override val callPermissions: NativeCallPermissions get() = g.calls.callPermissions
+    override fun requestCallPermissions(activity: Activity?, done: (NativeCallPermissions) -> Unit) =
+        g.calls.requestCallPermissions(activity) { done(it) }
+    override fun openCallSettings(item: NativeCallPermission, activity: Activity?): Boolean = g.calls.openCallSettings(item, activity)
+    override val callSetupProblems: List<NativeCallSetupProblem> get() = g.calls.callSetupProblems
 
     override val voiceConnected: Boolean get() = g.voice.connected
     override val voiceConnecting: Boolean get() = g.voice.connecting

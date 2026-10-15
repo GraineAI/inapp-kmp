@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.9.0")
-            implementation("ai.graine:inapp-kmp-compose:0.9.0")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.10.0")
+            implementation("ai.graine:inapp-kmp-compose:0.10.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -68,14 +68,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.9.0`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.10.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.9.0'`
-  (or `pod 'GraineInApp', '~> 0.9.0'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.9.0"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.10.0'`
+  (or `pod 'GraineInApp', '~> 0.10.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.10.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -100,8 +100,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.9.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.9.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.10.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.10.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -304,6 +304,34 @@ is the in-app one.
 `enableVoIPPushes()` on iOS, the SDK registers the device, rings the calls the
 agent, the user or the dashboard booked, and reports what became of each.
 
+**What the SDK does, what your app adds.** The platform SDKs do the calls
+themselves — CallKit and VoIP pushes, the ringing notification and call screen
+(the Android manifest merges every entry), the screen-off call, the microphone
+asked for when a call starts without it — and check your setup at `configure`,
+logging each problem once with its fix. Your app adds the iOS capabilities and
+Info.plist entries (Push Notifications, Background Modes *Audio* and *Voice over
+IP*, `NSMicrophoneUsageDescription`), Firebase messaging on Android, and one call
+to ask for the permissions at a moment you choose — never needed at launch:
+
+```kotlin
+val p = Graine.calls.requestCallPermissions()   // suspends until answered
+// p.microphone · p.notifications (Android 13+) · p.fullScreen (Android 14+), each
+// GRANTED · DENIED (not yet) · BLOCKED (only Settings can change it) · NOT_NEEDED (iOS: CallKit rings)
+if (p.fullScreen == GraineCallPermissionStatus.BLOCKED) Graine.calls.openCallSettings(GraineCallPermission.FULL_SCREEN)
+
+// What is still missing, in plain words — the same list the log shows:
+Graine.calls.callSetupProblems.forEach { println("${it.code}: ${it.message}") }
+```
+
+`Graine.calls.callPermissions` reads them at any time; `allGranted` is true when
+each is granted or not needed. The codes: iOS `microphone_usage_missing`,
+`background_audio_missing`, `background_voip_missing`,
+`push_entitlement_missing`, `voip_pushes_not_enabled`, `no_voip_token`; Android
+`manifest_entry_missing`, `no_push_token`, `notifications_not_allowed`,
+`full_screen_not_allowed`; both `microphone_blocked`, `hosted_ringing_off`. A
+problem is never an exception: calls still work where they can. On iOS these
+need GraineInApp of this version.
+
 ### WebRTC calls
 
 Calls carry their audio over a WebSocket unless the app includes each
@@ -437,8 +465,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.9.0 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.9.0 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.10.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.10.0 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

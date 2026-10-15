@@ -4,6 +4,10 @@ import ai.graine.inapp.ActionResult
 import ai.graine.inapp.FrictionSignal
 import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallListener
+import ai.graine.inapp.GraineCallPermission as NativeCallPermission
+import ai.graine.inapp.GraineCallPermissionStatus as NativeStatus
+import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
+import ai.graine.inapp.GraineCallSetupProblem as NativeCallSetupProblem
 import ai.graine.inapp.GraineCallOutcome as NativeOutcome
 import ai.graine.inapp.GraineCallSource as NativeCallSource
 import ai.graine.inapp.GraineCallState as NativeCallState
@@ -163,6 +167,23 @@ class AndroidEngineTest {
         override fun endCall() { did += "endCall" }
         override fun setCallMuted(muted: Boolean) { did += "callMuted:$muted" }
         override fun setCallSpeaker(on: Boolean) { did += "speaker:$on" }
+        var permissionsNow = NativeCallPermissions(NativeStatus.DENIED, NativeStatus.DENIED, NativeStatus.BLOCKED)
+        var permissionsAfterAsking: NativeCallPermissions? = null
+        var askedFrom: Activity? = null
+        var settingsFrom: Activity? = null
+        override val callPermissions: NativeCallPermissions get() = permissionsNow
+        override fun requestCallPermissions(activity: Activity?, done: (NativeCallPermissions) -> Unit) {
+            askedFrom = activity
+            did += "requestCallPermissions"
+            permissionsAfterAsking?.let { permissionsNow = it }
+            done(permissionsNow)
+        }
+        override fun openCallSettings(item: NativeCallPermission, activity: Activity?): Boolean {
+            settingsFrom = activity
+            did += "openCallSettings:${item.wire}"
+            return true
+        }
+        override var callSetupProblems: List<NativeCallSetupProblem> = emptyList()
 
         override var voiceConnected = false
         override var voiceConnecting = false
@@ -811,5 +832,33 @@ class AndroidEngineTest {
             "surfaceRaised":"#1F2125","text":"#F5F5F4","textMuted":"#A0A5AE","border":"#2A2D33","accent":"#318CE7","onAccent":"#FFFFFF",
             "accentSoft":"#1B2D44","success":"#16A34A","warning":"#D97706","danger":"#DC2626","userBubble":"#318CE7",
             "userBubbleText":"#FFFFFF","agentBubble":"#1F2125","agentBubbleText":"#F5F5F4","scrim":"#000000"}}"""
+    }
+
+    // ── permissions and setup ─────────────────────────────────────────────
+
+    @Test
+    fun theAndroidSdksPermissionsCrossByTheirWords() {
+        start()
+        assertEquals(
+            GraineCallPermissions(GraineCallPermissionStatus.DENIED, GraineCallPermissionStatus.DENIED, GraineCallPermissionStatus.BLOCKED),
+            engine.callsPermissions(),
+        )
+        port.permissionsAfterAsking = NativeCallPermissions(NativeStatus.GRANTED, NativeStatus.GRANTED, NativeStatus.NOT_NEEDED)
+        front = Activity()
+        var after: GraineCallPermissions? = null
+        engine.callsRequestPermissions { after = it }
+        assertTrue(after!!.allGranted)
+        assertTrue("asked over the screen in front", port.askedFrom === front)
+        assertTrue(engine.callsOpenSettings(GraineCallPermission.FULL_SCREEN))
+        assertTrue(port.did.contains("openCallSettings:fullScreen"))
+        assertTrue(port.settingsFrom === front)
+    }
+
+    @Test
+    fun theAndroidSdksSetupProblemsCrossAsTheyAre() {
+        start()
+        assertTrue(engine.callsSetupProblems().isEmpty())
+        port.callSetupProblems = listOf(NativeCallSetupProblem("full_screen_not_allowed", "Offer the setting."))
+        assertEquals(listOf(GraineCallSetupProblem("full_screen_not_allowed", "Offer the setting.")), engine.callsSetupProblems())
     }
 }

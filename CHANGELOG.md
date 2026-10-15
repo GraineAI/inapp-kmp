@@ -1,3 +1,8 @@
+## 0.10.0
+
+- **Call permissions, asked when the app chooses.** `Graine.calls.requestCallPermissions()` (suspending) asks for what the system's dialog can still ask for — the microphone, and notifications on Android 13+ — never on its own at launch; `Graine.calls.callPermissions` reads the microphone, notifications and the full-screen ring (Android 14+), each `GRANTED`, `DENIED`, `BLOCKED` or `NOT_NEEDED`, with `allGranted`; `openCallSettings(GraineCallPermission)` opens the right Settings page. Types: `GraineCallPermission`, `GraineCallPermissionStatus`, `GraineCallPermissions`. On iOS they need GraineInApp of this version.
+- **`Graine.calls.callSetupProblems`**: what the app's setup still lacks for calls — `GraineCallSetupProblem(code, message)`, each with the exact fix, the same codes as every platform SDK (Info.plist entries, the push entitlement, VoIP pushes and their token on iOS; a manifest entry, the push token, notifications and the full-screen ring on Android; the microphone blocked and Graine not ringing this phone on both). A problem is never an exception.
+
 ## 0.9.0
 
 - **WebRTC calls.** `GraineCallsConfig(callTransport = …)`: `GraineCallTransport.AUTO` (the default — WebRTC when the app includes the platform's WebRTC module), `WEBSOCKET` or `WEBRTC`, mapped to each platform SDK's own setting. `GraineCallInfo.transport` (`WEBRTC` or `WEBSOCKET`) and `transportFallbackReason` say which one carried a call, and why a call that tried WebRTC is on the WebSocket. The WebRTC module is the app's choice: on Android `ai.graine:inapp-android-rtc` beside the SDK, on iOS the `GraineInAppRTC` package or pod beside `GraineInApp`. A call WebRTC cannot set up goes on over the WebSocket inside the same call.

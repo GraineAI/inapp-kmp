@@ -52,6 +52,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (GraineObjCRegistration *)observe:(void (^)(void))observer;
 - (GraineObjCRegistration *)observeOutcomes:(void (^)(NSString *json))observer;
 - (GraineObjCRegistration *)observeIncoming:(void (^)(NSString *json))observer;
+@property (nonatomic, readonly) NSString *callPermissionsJSON;
+@property (nonatomic, readonly) NSString *callSetupProblemsJSON;
+- (void)requestCallPermissionsJSONWithCompletion:(void (^)(NSString *json))completion;
+- (BOOL)openCallSettings:(NSString *)item;
 @end
 
 @interface GraineObjCVoice : NSObject
