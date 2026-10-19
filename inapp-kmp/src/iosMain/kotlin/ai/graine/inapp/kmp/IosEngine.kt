@@ -194,6 +194,11 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun callsStart(reason: String?, variables: Map<String, Any?>): String? =
         facade.calls.startCallJSONWithReason(reason, Json.write(variables))
 
+    // New in the facade after 0.10.3: an older GraineInApp prepares each call at the tap, as it always did.
+    override fun callsPrepare(reason: String?, variables: Map<String, Any?>) {
+        if (facade.calls.respondsToSelector(PREPARE_CALL)) facade.calls.prepareCallJSONWithReason(reason, Json.write(variables))
+    }
+
     override fun callsAnswer() = facade.calls.answer()
     override fun callsDecline() = facade.calls.decline()
     override fun callsEnd() = facade.calls.end()
@@ -243,6 +248,8 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val CURRENT_VARIABLES = NSSelectorFromString("currentVariablesJSON")
         private val SET_CAPTIONS_ON = NSSelectorFromString("setCaptionsOn:")
         private val CLEAR_CAPTIONS = NSSelectorFromString("clearCaptions")
+        // New in the facade after 0.10.3 (asked for before each use).
+        private val PREPARE_CALL = NSSelectorFromString("prepareCallJSONWithReason:variablesJSON:")
         private val OLD_IOS_SDK =
             "This app links a GraineInApp without the booking sheet. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
 

@@ -522,6 +522,44 @@ class GraineApiTest {
     }
 
     @Test
+    fun prepareCallHandsTheNextCallToThePlatformAndAnswersNothing() {
+        configured()
+        Graine.calls.prepareCall("  ", mapOf("order" to "A-1"))
+        Graine.calls.prepareCall("kyc_help")
+        Graine.agent()!!.prepareCall("kyc_help", mapOf("order" to "A-2"))
+        assertEquals(listOf("prepareCall:null:[order]", "prepareCall:kyc_help:[]", "prepareCall:kyc_help:[order]"), engine.calls)
+        assertEquals(mapOf<String, Any?>("order" to "A-1"), engine.prepared.first().second)
+        assertEquals(GraineCallState.IDLE, Graine.calls.state.value.state, "nothing is placed")
+    }
+
+    // The platform SDKs never dial a call prepared for anyone else (the Android and iOS suites prove it on
+    // their engines); the shared code's part is handing every change of who the user is to the platform, in
+    // order, before the call it precedes.
+
+    @Test
+    fun anotherUsersCallFollowsTheSignOutAndTheNewUserToThePlatform() {
+        configured()
+        Graine.identify(mapOf("user_id" to "user-a"))
+        Graine.calls.prepareCall("help")
+        Graine.identify(null)
+        Graine.identify(mapOf("user_id" to "user-b"))
+        assertEquals("call_1", Graine.calls.startCall("help"))
+        assertEquals(listOf("identify", "prepareCall:help:[]", "identify", "identify", "startCall:help:[]"), engine.calls)
+        assertEquals(listOf(mapOf<String, Any?>("user_id" to "user-a"), null, mapOf<String, Any?>("user_id" to "user-b")), engine.identified.map { it.first })
+    }
+
+    @Test
+    fun aNewMemoryChoiceReachesThePlatformBeforeTheCall() {
+        configured()
+        Graine.identify(mapOf("user_id" to "user-a"), memory = true)
+        Graine.calls.prepareCall("help")
+        Graine.setMemory(false)
+        Graine.calls.startCall("help")
+        assertEquals(listOf("identify", "prepareCall:help:[]", "setMemory:false", "startCall:help:[]"), engine.calls)
+        assertFalse(engine.memoryEnabled)
+    }
+
+    @Test
     fun theVoiceBarsCallIsAStateAndThreeControls() {
         configured()
         engine.sink.voice(GraineVoiceInfo(connected = true, muted = true))
@@ -532,7 +570,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.10.3", GraineKmpVersion.NAME)
+        assertEquals("0.11.0", GraineKmpVersion.NAME)
     }
 
     @Test

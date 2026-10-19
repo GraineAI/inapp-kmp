@@ -170,6 +170,9 @@ internal class AndroidEngine(
         port.startCall(activity, reason, variables)
     }
 
+    /** No activity needed: nothing is dialled until a call starts. */
+    override fun callsPrepare(reason: String?, variables: Map<String, Any?>) = onMain { port.prepareCall(reason, variables) }
+
     override fun callsAnswer() = port.answerCall()
     override fun callsDecline() = port.declineCall()
     override fun callsEnd() = port.endCall()

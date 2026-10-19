@@ -133,6 +133,19 @@ class MultiAgentTest {
     }
 
     @Test
+    fun eachAgentsCallIsPreparedAndPlacedOnlyWithThatAgent() {
+        Graine.calls.prepareCall("help")
+        Graine.calls.prepareCall("refund", agent = "support")
+        Graine.agent("support")!!.prepareCall("refund", mapOf("order" to "A-1"))
+        assertEquals(listOf("prepareCall:help:[]"), main.calls)
+        assertEquals(listOf("prepareCall:refund:[]", "prepareCall:refund:[order]"), support.calls)
+        Graine.calls.startCall("refund", agent = "support")
+        assertEquals("startCall:refund:[]", support.calls.last())
+        assertEquals(listOf("prepareCall:help:[]"), main.calls, "the default agent's prepared call is not this one")
+        assertFailsWith<IllegalStateException> { Graine.calls.prepareCall(agent = "sales") }
+    }
+
+    @Test
     fun anAppWithOnlyNamedAgentsUsesTheFirstForWhatItHasOnce() {
         Graine.reset()
         val sales = FakeEngine().apply { installId = "aa11bb22-0000-4000-8000-000000000001" }

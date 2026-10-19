@@ -24,6 +24,7 @@ internal class FakeEngine : GraineEngine {
     var newConversationAnswer: Result<Unit>? = Result.success(Unit)
 
     val identified = mutableListOf<Pair<Map<String, Any?>?, Boolean?>>()
+    val prepared = mutableListOf<Pair<String?, Map<String, Any?>>>()
     val screens = mutableListOf<GraineScreen?>()
     val scheduled = mutableListOf<Pair<Instant, String?>>()
     val tracked = mutableListOf<Pair<String, Map<String, Any?>>>()
@@ -108,6 +109,7 @@ internal class FakeEngine : GraineEngine {
     override fun callsConfigure(config: GraineCallsConfig) { callsConfig = config; calls += "callsConfigure" }
     override fun callsEnableVoIPPushes() { calls += "enableVoIPPushes" }
     override fun callsStart(reason: String?, variables: Map<String, Any?>): String? { calls += "startCall:$reason:${variables.keys}"; return startCallAnswer }
+    override fun callsPrepare(reason: String?, variables: Map<String, Any?>) { prepared += reason to variables; calls += "prepareCall:$reason:${variables.keys}" }
     override fun callsAnswer() { calls += "answer" }
     override fun callsDecline() { calls += "decline" }
     override fun callsEnd() { calls += "end" }

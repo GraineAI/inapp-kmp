@@ -101,6 +101,8 @@ internal interface AndroidPort {
     fun configureCalls(config: NativeCallsConfig)
     /** A call with this port's agent. */
     fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String?
+    /** This port's agent's next call, ready before the tap (GraineCalls.prepareCall). */
+    fun prepareCall(reason: String?, variables: Map<String, Any?>)
     fun callBack(activity: Activity, missedCallId: String?, reason: String?): String?
     fun answerCall()
     fun declineCall()
@@ -190,6 +192,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun configureCalls(config: NativeCallsConfig) = g.calls.configure(config)
     override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? =
         g.calls.startCall(activity, reason, variables, agent = g.name)
+    override fun prepareCall(reason: String?, variables: Map<String, Any?>) = g.calls.prepareCall(reason, variables, agent = g.name)
     override fun callBack(activity: Activity, missedCallId: String?, reason: String?): String? = g.calls.callBack(activity, missedCallId, reason)
     override fun answerCall() = g.calls.answer()
     override fun declineCall() = g.calls.decline()

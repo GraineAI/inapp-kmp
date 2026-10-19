@@ -211,6 +211,10 @@ class GraineAgent internal constructor(
     fun startCall(reason: String? = null, variables: Map<String, Any?> = emptyMap()): String? =
         Graine.calls.startCall(reason, variables, agent = name)
 
+    /** The user's next call to this agent, ready before they tap: `Graine.calls.prepareCall(reason, variables, agent = name)`. */
+    fun prepareCall(reason: String? = null, variables: Map<String, Any?> = emptyMap()) =
+        Graine.calls.prepareCall(reason, variables, agent = name)
+
     // ── plumbing ──────────────────────────────────────────────────────────
 
     /** The session, waited for — at most [Graine.SESSION_WAIT_MS], and no longer once it is known not to be coming. */

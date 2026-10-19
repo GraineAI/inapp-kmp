@@ -42,6 +42,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)configureWithDisplayName:(NSString *)displayName ringtoneSound:(nullable NSString *)ringtoneSound ringTimeout:(double)ringTimeout includesCallsInRecents:(BOOL)includesCallsInRecents;
 - (void)enableVoIPPushes;
 - (nullable NSString *)startCallJSONWithReason:(nullable NSString *)reason variablesJSON:(nullable NSString *)variablesJSON;
+- (void)prepareCallJSONWithReason:(nullable NSString *)reason variablesJSON:(nullable NSString *)variablesJSON;
 - (void)answer;
 - (void)decline;
 - (void)end;

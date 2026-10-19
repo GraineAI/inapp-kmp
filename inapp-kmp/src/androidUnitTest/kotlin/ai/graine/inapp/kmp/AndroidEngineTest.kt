@@ -161,6 +161,7 @@ class AndroidEngineTest {
         override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? {
             startedFrom = activity; did += "startCall:$reason:$variables"; return "call_9"
         }
+        override fun prepareCall(reason: String?, variables: Map<String, Any?>) { did += "prepareCall:$reason:$variables" }
         override fun callBack(activity: Activity, missedCallId: String?, reason: String?): String? { callBackArgs = missedCallId to reason; return "call_10" }
         override fun answerCall() { did += "answer" }
         override fun declineCall() { did += "decline" }
@@ -720,6 +721,16 @@ class AndroidEngineTest {
             listOf("startCall:kyc_help:{order=A-1}", "answer", "decline", "endCall", "callMuted:true", "speaker:false"),
             port.did,
         )
+    }
+
+    @Test
+    fun aCallIsPreparedWithNoScreenInFront() {
+        start()
+        // No activity needed, none asked for: nothing is dialled until a call starts.
+        engine.callsPrepare("kyc_help", mapOf("order" to "A-1"))
+        engine.callsPrepare(null, emptyMap())
+        assertEquals(listOf("prepareCall:kyc_help:{order=A-1}", "prepareCall:null:{}"), port.did)
+        assertNull("nothing started", port.startedFrom)
     }
 
     @Test

@@ -271,6 +271,29 @@ class GraineCalls internal constructor() {
     fun startCall(reason: String? = null, variables: Map<String, Any?> = emptyMap(), agent: String? = null): String? =
         Graine.engineFor(agent).callsStart(reason?.takeIf { it.isNotBlank() }, variables)
 
+    /**
+     * Get the user's next call to an agent — [agent] by name, the default
+     * agent when null — ready before they tap, so that when they do,
+     * [startCall] connects almost at once. Call it when the screen with your
+     * call button appears; calling it again is cheap: while a call prepared
+     * for the same agent, user, [reason] and [variables] is ready, nothing
+     * more happens. A [startCall] with the same reason and variables within
+     * four minutes uses it; any other call is prepared at the tap, as without
+     * this.
+     *
+     * Nothing is dialled and no conversation starts — nothing is billed —
+     * until [startCall], and the microphone is not touched. What was prepared
+     * is let go when the app goes to the background, the signed-in user
+     * changes ([Graine.identify], sign-out, [Graine.setMemory], the phone's
+     * time zone), after four minutes, when calls stop using WebRTC, or when a
+     * call rings in. For calls over WebRTC (the platform's WebRTC module in
+     * the app); otherwise, before the agent's settings have loaded, while a
+     * call rings or is live, or with a platform SDK from before it, it does
+     * nothing.
+     */
+    fun prepareCall(reason: String? = null, variables: Map<String, Any?> = emptyMap(), agent: String? = null) =
+        Graine.engineFor(agent).callsPrepare(reason?.takeIf { it.isNotBlank() }, variables)
+
     /** Pick up the ringing call (the SDK's call screen does this itself). */
     fun answer() = Graine.callsEngine().callsAnswer()
 

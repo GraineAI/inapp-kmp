@@ -73,6 +73,8 @@ internal interface GraineEngine {
     fun callsConfigure(config: GraineCallsConfig)
     fun callsEnableVoIPPushes()
     fun callsStart(reason: String?, variables: Map<String, Any?>): String?
+    /** The user's next call to this agent, ready before the tap; nothing is dialled. A platform SDK without it does nothing. */
+    fun callsPrepare(reason: String?, variables: Map<String, Any?>)
     fun callsAnswer()
     fun callsDecline()
     fun callsEnd()
