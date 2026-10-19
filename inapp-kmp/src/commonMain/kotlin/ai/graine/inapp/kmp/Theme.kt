@@ -1,5 +1,7 @@
 package ai.graine.inapp.kmp
 
+import kotlin.math.pow
+
 /**
  * THE BRAND'S DESIGN TOKENS, for UI of your own — the colours, type, corners,
  * depth, motion and icons the SDK draws with, for the device's current light
@@ -199,9 +201,144 @@ data class GraineThemeTokens(
         /** `system`, `graine` or `soft`. */
         val ringtone: String,
         val statusText: StatusText,
+        // ── The look (version 2: the design contract's "Call screen" → "The look"). From a
+        // server — or a platform SDK — that predates it, each is what the contract derives
+        // from the flat tokens above: the screen as it has always been drawn.
+        /** The ready look it was resolved from; `classic` is the screen as it has always been. */
+        val preset: String = "classic",
+        /** `classic`, `full-bleed`, `card`, `orb` or `minimal`. */
+        val layout: String = "classic",
+        /** The fill: [background] / [backgroundTo]'s flat stand-ins are its nearest single colours. */
+        val backdrop: Backdrop = Backdrop.flat(background, backgroundTo),
+        /** `light` when [text] is light: the status bar's icons follow it. */
+        val ink: String = if (ThemeBridge.luminance(text) > 0.5) "light" else "dark",
+        val avatarSize: Double = 112.0,
+        /** The ring the avatar wears in each of [MOMENTS]: `none`, `pulse`, `ripple` or `glow`. */
+        val rings: Map<String, String> = MOMENTS.associateWith { if (it == "incoming" || it == "scheduled") "pulse" else "none" },
+        val avatarRingColor: String = textMuted,
+        /** `solid`, `glass` or `outline`; Answer, Decline, End and Call back are always filled. */
+        val buttonStyle: String = "solid",
+        /** `circle`, `squircle` or `pill`. */
+        val buttonShape: String = "circle",
+        /** The call's buttons; the ring's and the missed call's are 9/8 of it. */
+        val buttonSize: Double = 64.0,
+        /** `below` or `none`. */
+        val buttonLabels: String = "below",
+        /** Every button's colours, by [ACTIONS]. */
+        val actions: Map<String, Action> = Action.flat(
+            buttonFill, buttonIcon, buttonActiveFill, buttonActiveIcon, endFill, endIcon,
+            acceptFill, acceptIcon, declineFill, declineIcon, callbackFill, callbackIcon,
+        ),
+        /** The agent's voice on a connected call: `none`, `bars`, `wave` or `orb`. */
+        val visualizer: String = "none",
+        val visualizerColor: String = text,
+        val visualizerSensitivity: Double = 0.5,
+        /** `plain`, `card`, `subtitle` or `bubble`. */
+        val captionStyle: String = "plain",
+        /** `middle` or `bottom`. */
+        val captionPosition: String = "middle",
+        /** Behind a card, subtitle or bubble caption: this colour at [captionFillAlpha]. */
+        val captionFill: String = if (ink == "light") "#000000" else "#FFFFFF",
+        val captionFillAlpha: Double = 0.0,
+        val nameSize: Double = 28.0,
+        /** CSS weights, 100–900. */
+        val nameWeight: Int = 600,
+        val statusSize: Double = 16.0,
+        val statusWeight: Int = 400,
+        /** A moment's own look where it differs from the screen's ([lookFor]). */
+        val states: Map<String, Look> = emptyMap(),
     ) {
-        /** The words under the name for each moment; null where the design leaves the SDK's own. */
-        data class StatusText(val ringing: String, val connecting: String, val ended: String, val scheduled: String?, val missed: String?)
+        /**
+         * The words under the name for each moment; null where the design leaves the SDK's own —
+         * a placed call's (`outgoing`) then says the connecting words, a recovering one's "Reconnecting…".
+         */
+        data class StatusText(
+            val ringing: String,
+            val connecting: String,
+            val ended: String,
+            val scheduled: String?,
+            val missed: String?,
+            val outgoing: String? = null,
+            val reconnecting: String? = null,
+        )
+
+        /** One colour of the backdrop, at a position 0–1 along it. */
+        data class Stop(val color: String, val at: Double)
+
+        /** `solid`, `linear`, `radial`, `mesh` or `blurred-avatar`; [angle] as CSS reads it (180: top to bottom). */
+        data class Backdrop(
+            val type: String,
+            val stops: List<Stop>,
+            val angle: Double = 180.0,
+            /** `none`, `drift` or `breathe`. */
+            val motion: String = "none",
+            val intensity: Double = 0.5,
+            /** A blurred avatar's scrim opacity; 1 for every other type. */
+            val scrim: Double = 1.0,
+        ) {
+            companion object {
+                /** The flat fill: one colour, or a gradient top to bottom. */
+                fun flat(background: String, backgroundTo: String?): Backdrop =
+                    if (backgroundTo == null) Backdrop("solid", listOf(Stop(background, 0.0)))
+                    else Backdrop("linear", listOf(Stop(background, 0.0), Stop(backgroundTo, 1.0)))
+            }
+        }
+
+        /** One button's colours: [fillAlpha] below 1 is glass, 0 an outline in [stroke]; [activeFill] while a toggle is on. */
+        data class Action(
+            val fill: String,
+            val fillAlpha: Double,
+            val icon: String,
+            val stroke: String?,
+            val activeFill: String,
+            val activeIcon: String,
+        ) {
+            companion object {
+                internal fun of(fill: String, icon: String, activeFill: String = fill, activeIcon: String = icon) =
+                    Action(fill, 1.0, icon, null, activeFill, activeIcon)
+
+                /** Every button as the flat tokens describe it. */
+                fun flat(
+                    buttonFill: String, buttonIcon: String, buttonActiveFill: String, buttonActiveIcon: String,
+                    endFill: String, endIcon: String, acceptFill: String, acceptIcon: String,
+                    declineFill: String, declineIcon: String, callbackFill: String, callbackIcon: String,
+                ): Map<String, Action> {
+                    val neutral = of(buttonFill, buttonIcon, buttonActiveFill, buttonActiveIcon)
+                    return linkedMapOf(
+                        "answer" to of(acceptFill, acceptIcon), "decline" to of(declineFill, declineIcon),
+                        "end" to of(endFill, endIcon), "callback" to of(callbackFill, callbackIcon),
+                        "mute" to neutral, "speaker" to neutral, "chat" to neutral, "close" to neutral,
+                    )
+                }
+            }
+        }
+
+        /** What changes from one moment to another: everything drawn in a colour. */
+        data class Look(
+            val backdrop: Backdrop,
+            val ink: String,
+            val text: String,
+            val textMuted: String,
+            val avatarRingColor: String,
+            val actions: Map<String, Action>,
+            val visualizerColor: String,
+            val captionFill: String,
+            val captionFillAlpha: Double,
+        )
+
+        /** The screen's own look. */
+        val look: Look get() = Look(backdrop, ink, text, textMuted, avatarRingColor, actions, visualizerColor, captionFill, captionFillAlpha)
+
+        /** What a moment of [MOMENTS] is drawn in: its own look, else the screen's. */
+        fun lookFor(moment: String): Look = states[moment] ?: look
+
+        companion object {
+            /** The eight moments a call screen shows. */
+            val MOMENTS: List<String> = listOf("incoming", "scheduled", "outgoing", "connecting", "connected", "reconnecting", "ended", "missed")
+
+            /** Every button, by name (`close` is the missed call's Close). */
+            val ACTIONS: List<String> = listOf("answer", "decline", "end", "callback", "mute", "speaker", "chat", "close")
+        }
     }
 }
 
@@ -275,7 +412,7 @@ internal object ThemeBridge {
             bubbles = str(o["bubbles"], "filled"),
             chrome = str(o["chrome"], "none"),
             chat = (o["chat"] as? Map<*, *>)?.let { chat(it) },
-            call = (o["call"] as? Map<*, *>)?.let { call(it) },
+            call = (o["call"] as? Map<*, *>)?.let { call(it, weights) },
         )
     }
 
@@ -293,9 +430,9 @@ internal object ThemeBridge {
         showHistory = o["showHistory"] != false, newConversation = o["newConversation"] != false,
     )
 
-    private fun call(o: Map<*, *>): GraineThemeTokens.Call {
+    private fun call(o: Map<*, *>, weights: Map<*, *>): GraineThemeTokens.Call {
         val status = obj(o["statusText"])
-        return GraineThemeTokens.Call(
+        val flat = GraineThemeTokens.Call(
             background = str(o["background"]), backgroundTo = o["backgroundTo"] as? String,
             text = str(o["text"]), textMuted = str(o["textMuted"]),
             avatar = str(o["avatar"], "logo"), avatarShape = str(o["avatarShape"], "circle"),
@@ -312,8 +449,134 @@ internal object ThemeBridge {
             statusText = GraineThemeTokens.Call.StatusText(
                 str(status["ringing"]), str(status["connecting"]), str(status["ended"]),
                 status["scheduled"] as? String, status["missed"] as? String,
+                status["outgoing"] as? String, status["reconnecting"] as? String,
             ),
         )
+        return look(flat, o, weights)
+    }
+
+    // ── The call screen's look (version 2) ─────────────────────────────────
+
+    private val LAYOUTS = listOf("classic", "full-bleed", "card", "orb", "minimal")
+    private val LAYOUT_NAME_SIZE = mapOf("classic" to 28.0, "full-bleed" to 40.0, "card" to 24.0, "orb" to 24.0, "minimal" to 34.0)
+    private val PRESETS = listOf("classic", "aurora", "midnight", "glass", "orbit", "daylight", "bloom", "studio", "minimal", "mono")
+    private val BACKDROPS = listOf("solid", "linear", "radial", "mesh", "blurred-avatar")
+    private val MOTIONS = listOf("none", "drift", "breathe")
+    private val INKS = listOf("light", "dark")
+    private val RINGS = listOf("none", "pulse", "ripple", "glow")
+    private val STYLES = listOf("solid", "glass", "outline")
+    private val SHAPES = listOf("circle", "squircle", "pill")
+    private val LABELS = listOf("below", "none")
+    private val VISUALIZERS = listOf("none", "bars", "wave", "orb")
+    private val CAPTIONS = listOf("plain", "card", "subtitle", "bubble")
+    private val POSITIONS = listOf("middle", "bottom")
+    private val HEX = Regex("^#[0-9A-Fa-f]{6}$")
+
+    /** A word of [allowed] at [k]: absent, [own]; one this build does not know (a newer server's), the first listed. */
+    private fun word(o: Map<*, *>, k: String, allowed: List<String>, own: String): String {
+        val v = o[k] ?: return own
+        return (v as? String)?.trim()?.lowercase()?.takeIf { it in allowed } ?: allowed.first()
+    }
+
+    private fun hex(v: Any?): String? = (v as? String)?.takeIf { HEX.matches(it) }?.uppercase()
+
+    private fun backdrop(v: Any?, own: GraineThemeTokens.Call.Backdrop): GraineThemeTokens.Call.Backdrop {
+        val o = v as? Map<*, *> ?: return own
+        val stops = (o["stops"] as? List<*>).orEmpty().mapNotNull { s ->
+            val m = s as? Map<*, *> ?: return@mapNotNull null
+            val c = hex(m["color"]) ?: return@mapNotNull null
+            val at = num(m["at"]) ?: return@mapNotNull null
+            GraineThemeTokens.Call.Stop(c, at)
+        }
+        return GraineThemeTokens.Call.Backdrop(
+            type = word(o, "type", BACKDROPS, own.type),
+            stops = stops.ifEmpty { own.stops },
+            angle = num(o["angle"]) ?: own.angle,
+            motion = word(o, "motion", MOTIONS, own.motion),
+            intensity = num(o["intensity"]) ?: own.intensity,
+            scrim = num(o["scrim"]) ?: own.scrim,
+        )
+    }
+
+    private fun actions(v: Any?, own: Map<String, GraineThemeTokens.Call.Action>): Map<String, GraineThemeTokens.Call.Action> {
+        val o = v as? Map<*, *> ?: return own
+        return own.mapValues { (name, d) ->
+            val a = o[name] as? Map<*, *> ?: return@mapValues d
+            GraineThemeTokens.Call.Action(
+                fill = hex(a["fill"]) ?: d.fill,
+                fillAlpha = num(a["fillAlpha"]) ?: d.fillAlpha,
+                icon = hex(a["icon"]) ?: d.icon,
+                // Null is an answer (no outline); a colour that is not one is the derived one.
+                stroke = if (a.containsKey("stroke")) a["stroke"]?.let { hex(it) ?: d.stroke } else d.stroke,
+                activeFill = hex(a["activeFill"]) ?: d.activeFill,
+                activeIcon = hex(a["activeIcon"]) ?: d.activeIcon,
+            )
+        }
+    }
+
+    private fun lookOf(v: Any?, own: GraineThemeTokens.Call.Look): GraineThemeTokens.Call.Look {
+        val o = v as? Map<*, *> ?: return own
+        return GraineThemeTokens.Call.Look(
+            backdrop = backdrop(o["backdrop"], own.backdrop),
+            ink = word(o, "ink", INKS, own.ink),
+            text = hex(o["text"]) ?: own.text,
+            textMuted = hex(o["textMuted"]) ?: own.textMuted,
+            avatarRingColor = hex(o["avatarRingColor"]) ?: own.avatarRingColor,
+            actions = actions(o["actions"], own.actions),
+            visualizerColor = hex(o["visualizerColor"]) ?: own.visualizerColor,
+            captionFill = hex(o["captionFill"]) ?: own.captionFill,
+            captionFillAlpha = num(o["captionFillAlpha"]) ?: own.captionFillAlpha,
+        )
+    }
+
+    /** [flat] with the look [o] carries, each key read against what the contract derives for it. */
+    private fun look(flat: GraineThemeTokens.Call, o: Map<*, *>, weights: Map<*, *>): GraineThemeTokens.Call {
+        // The flat screen in the look's terms, with the design's own weights for the name and the status.
+        val own = flat.copy(nameWeight = int(weights["title"], 600), statusWeight = int(weights["body"], 400))
+        val rings = (o["rings"] as? Map<*, *>)?.let { r ->
+            GraineThemeTokens.Call.MOMENTS.associateWith { m -> word(r, m, RINGS, own.rings.getValue(m)) }
+        } ?: own.rings
+        val layout = word(o, "layout", LAYOUTS, own.layout)
+        val read = own.copy(
+            preset = word(o, "preset", PRESETS, own.preset),
+            layout = layout,
+            backdrop = backdrop(o["backdrop"], own.backdrop),
+            ink = word(o, "ink", INKS, own.ink),
+            avatarSize = num(o["avatarSize"]) ?: own.avatarSize,
+            rings = rings,
+            avatarRingColor = hex(o["avatarRingColor"]) ?: own.avatarRingColor,
+            buttonStyle = word(o, "buttonStyle", STYLES, own.buttonStyle),
+            buttonShape = word(o, "buttonShape", SHAPES, own.buttonShape),
+            buttonSize = num(o["buttonSize"]) ?: own.buttonSize,
+            buttonLabels = word(o, "buttonLabels", LABELS, own.buttonLabels),
+            actions = actions(o["actions"], own.actions),
+            visualizer = word(o, "visualizer", VISUALIZERS, own.visualizer),
+            visualizerColor = hex(o["visualizerColor"]) ?: own.visualizerColor,
+            visualizerSensitivity = num(o["visualizerSensitivity"]) ?: own.visualizerSensitivity,
+            captionStyle = word(o, "captionStyle", CAPTIONS, own.captionStyle),
+            captionPosition = word(o, "captionPosition", POSITIONS, own.captionPosition),
+            captionFill = hex(o["captionFill"]) ?: own.captionFill,
+            captionFillAlpha = num(o["captionFillAlpha"]) ?: own.captionFillAlpha,
+            nameSize = num(o["nameSize"]) ?: LAYOUT_NAME_SIZE[layout] ?: own.nameSize,
+            nameWeight = num(o["nameWeight"])?.toInt() ?: own.nameWeight,
+            statusSize = num(o["statusSize"]) ?: own.statusSize,
+            statusWeight = num(o["statusWeight"])?.toInt() ?: own.statusWeight,
+        )
+        // The moments' own looks: exactly the moments sent, each read against the screen's look.
+        val states = o["states"] as? Map<*, *> ?: return read
+        val screen = read.look
+        return read.copy(states = GraineThemeTokens.Call.MOMENTS.filter { states[it] is Map<*, *> }.associateWith { lookOf(states[it], screen) })
+    }
+
+    /** WCAG relative luminance of a #RRGGBB colour; 0 for anything else. */
+    internal fun luminance(hex: String): Double {
+        if (!HEX.matches(hex)) return 0.0
+        val n = hex.substring(1).toInt(16)
+        fun ch(c: Int): Double {
+            val s = c / 255.0
+            return if (s <= 0.03928) s / 12.92 else ((s + 0.055) / 1.055).pow(2.4)
+        }
+        return 0.2126 * ch((n shr 16) and 255) + 0.7152 * ch((n shr 8) and 255) + 0.0722 * ch(n and 255)
     }
 
     private fun shadow(v: Any?): GraineThemeTokens.Shadow? = (v as? Map<*, *>)?.let {

@@ -223,6 +223,7 @@ internal class AndroidEngine(
                 agent = port.callAgentName.takeIf { c != null },
                 transport = GraineCallTransport.ofCall(port.callTransport).takeIf { c != null },
                 transportFallbackReason = port.callTransportFallbackReason.takeIf { c != null },
+                reconnecting = port.callReconnecting && c != null,
             )
         )
     }
@@ -272,6 +273,7 @@ internal class AndroidEngine(
 
         override fun onAgentSpeaking(speaking: Boolean) = publishCalls()
         override fun onCallControls(muted: Boolean, speaker: Boolean) = publishCalls()
+        override fun onCallReconnecting(reconnecting: Boolean) = publishCalls()
     }
 
     private fun remember(call: GraineCall) {

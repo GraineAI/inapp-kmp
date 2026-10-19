@@ -95,6 +95,75 @@ class ThemeTest {
     }
 
     @Test
+    fun aCallScreenFromBeforeTheLookIsDrawnAsItAlwaysWas() {
+        val k = ThemeBridge.parse(tokens(""","call":$call"""))!!.call!!
+        assertEquals("classic", k.preset)
+        assertEquals("classic", k.layout)
+        assertEquals(
+            GraineThemeTokens.Call.Backdrop("linear", listOf(GraineThemeTokens.Call.Stop("#0E0F11", 0.0), GraineThemeTokens.Call.Stop("#17181B", 1.0))),
+            k.backdrop, "the flat gradient, top to bottom",
+        )
+        assertEquals("light", k.ink)
+        assertEquals(112.0, k.avatarSize)
+        assertEquals(listOf("pulse", "pulse", "none", "none", "none", "none", "none", "none"), GraineThemeTokens.Call.MOMENTS.map { k.rings.getValue(it) }, "a ring only while it rings")
+        assertEquals(k.textMuted, k.avatarRingColor)
+        assertEquals(listOf("solid", "circle", "below"), listOf(k.buttonStyle, k.buttonShape, k.buttonLabels))
+        assertEquals(64.0, k.buttonSize)
+        assertEquals(GraineThemeTokens.Call.Action("#333435", 1.0, "#F5F5F4", null, "#F5F5F4", "#0E0F11"), k.actions["mute"])
+        assertEquals(GraineThemeTokens.Call.ACTIONS, k.actions.keys.toList())
+        assertEquals(k.acceptFill, k.actions.getValue("answer").fill)
+        assertEquals(k.endFill, k.actions.getValue("end").fill)
+        assertEquals(k.callbackFill, k.actions.getValue("callback").fill)
+        assertEquals(listOf("none", k.text, "plain", "middle", "#000000"), listOf(k.visualizer, k.visualizerColor, k.captionStyle, k.captionPosition, k.captionFill))
+        assertEquals(0.0, k.captionFillAlpha)
+        assertEquals(28.0, k.nameSize)
+        assertEquals(700, k.nameWeight, "the design's own title weight")
+        assertEquals(400, k.statusWeight)
+        assertTrue(k.states.isEmpty())
+        assertEquals(k.look, k.lookFor("missed"))
+        assertNull(k.statusText.outgoing, "a placed call says the connecting words")
+    }
+
+    @Test
+    fun theLookIsReadAsTheContractSpellsItAndAWordNobodyKnowsIsTheFirstListed() {
+        val look = ""","preset":"aurora","layout":"orb","ink":"light","avatarSize":96,"buttonStyle":"glass","buttonShape":"pill",
+            "buttonSize":72,"buttonLabels":"none",
+            "backdrop":{"type":"mesh","stops":[{"color":"#145C53","at":0},{"color":"nope","at":0.5},{"color":"#311C84","at":1}],
+                        "angle":180,"motion":"drift","intensity":0.6,"scrim":1},
+            "rings":{"incoming":"glow","scheduled":"glow","outgoing":"ripple","connecting":"none","connected":"spin",
+                     "reconnecting":"pulse","ended":"none","missed":"none"},
+            "actions":{"mute":{"fill":"#FFFFFF","fillAlpha":0.18,"icon":"#F5F5F4","stroke":null,"activeFill":"#F5F5F4","activeIcon":"#145C53"},
+                       "end":{"fill":"#B91C1C","fillAlpha":1,"icon":"#FFFFFF","stroke":"#FFFFFF","activeFill":"#B91C1C","activeIcon":"#FFFFFF"}},
+            "visualizer":"wave","visualizerColor":"#FFFFFF","visualizerSensitivity":0.8,"captionStyle":"subtitle",
+            "captionPosition":"bottom","captionFill":"#000000","captionFillAlpha":0.4,"nameSize":22,"nameWeight":500,
+            "statusSize":15,"statusWeight":400,
+            "states":{"ended":{"backdrop":{"type":"mesh","stops":[{"color":"#3F3F46","at":0}]},"text":"#F5F5F4"},"lunch":{"ink":"dark"}}"""
+        val withLook = call.dropLast(1) + look + "}"
+        val k = ThemeBridge.parse(tokens(""","call":$withLook"""))!!.call!!
+        assertEquals(listOf("aurora", "orb", "light", "glass", "pill", "none"), listOf(k.preset, k.layout, k.ink, k.buttonStyle, k.buttonShape, k.buttonLabels))
+        assertEquals(listOf(96.0, 72.0, 22.0, 15.0), listOf(k.avatarSize, k.buttonSize, k.nameSize, k.statusSize))
+        assertEquals(500, k.nameWeight)
+        assertEquals("mesh", k.backdrop.type)
+        assertEquals(listOf("#145C53", "#311C84"), k.backdrop.stops.map { it.color }, "a stop that is not a colour is skipped")
+        assertEquals("drift", k.backdrop.motion)
+        assertEquals("none", k.rings["connected"], "a ring this build does not know is the first listed")
+        assertEquals("ripple", k.rings["outgoing"])
+        assertEquals(0.18, k.actions.getValue("mute").fillAlpha)
+        assertNull(k.actions.getValue("mute").stroke)
+        assertEquals("#FFFFFF", k.actions.getValue("end").stroke)
+        assertEquals(k.acceptFill, k.actions.getValue("answer").fill, "a button the session left out is the flat one")
+        assertEquals(listOf("wave", "subtitle", "bottom"), listOf(k.visualizer, k.captionStyle, k.captionPosition))
+        assertEquals(setOf("ended"), k.states.keys, "a moment nobody knows is ignored")
+        val ended = k.lookFor("ended")
+        assertEquals("#3F3F46", ended.backdrop.stops.single().color)
+        assertEquals(k.actions, ended.actions, "what the moment leaves out is the screen's")
+        assertEquals(k.look, k.lookFor("connected"))
+        val odd = ThemeBridge.parse(tokens(""","call":${call.dropLast(1)},"layout":"sideways","buttonSize":"big"}"""))!!.call!!
+        assertEquals("classic", odd.layout)
+        assertEquals(64.0, odd.buttonSize)
+    }
+
+    @Test
     fun aSetWithoutItsColoursIsNoDesign() {
         assertNull(ThemeBridge.parse(null))
         assertNull(ThemeBridge.parse("not json"))

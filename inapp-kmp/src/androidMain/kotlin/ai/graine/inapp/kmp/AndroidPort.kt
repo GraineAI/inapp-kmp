@@ -91,6 +91,8 @@ internal interface AndroidPort {
     val callMuted: Boolean
     val callSpeaker: Boolean
     val callAgentSpeaking: Boolean
+    /** The call in progress is recovering its connection. */
+    val callReconnecting: Boolean
     /** The name of the agent the call in progress is with; null with no call. */
     val callAgentName: String?
     /** What the call in progress runs on: "webrtc" or "websocket"; null with no call. */
@@ -185,6 +187,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val callMuted: Boolean get() = g.calls.muted
     override val callSpeaker: Boolean get() = g.calls.speaker
     override val callAgentSpeaking: Boolean get() = g.calls.agentSpeaking
+    override val callReconnecting: Boolean get() = g.calls.reconnecting
     override val callAgentName: String? get() = g.calls.callAgent?.name
     override val callTransport: String? get() = g.calls.transport
     override val callTransportFallbackReason: String? get() = g.calls.transportFallbackReason

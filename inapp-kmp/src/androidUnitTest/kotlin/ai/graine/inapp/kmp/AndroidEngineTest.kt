@@ -153,6 +153,7 @@ class AndroidEngineTest {
         override val callMuted: Boolean get() = mutedNow
         override val callSpeaker: Boolean get() = speakerNow
         override var callAgentSpeaking = false
+        override var callReconnecting = false
         override var callAgentName: String? = null
         override var callTransport: String? = null
         override var callTransportFallbackReason: String? = null
@@ -638,6 +639,28 @@ class AndroidEngineTest {
         l.onCallState(NativeCallState.IDLE, null)
         assertNull(heard.calls!!.caption)
         assertFalse(heard.calls!!.showsCallScreen)
+    }
+
+    @Test
+    fun aRecoveringCallIsOnTheCallScreenStateOnlyWhileACallIsLive() {
+        start()
+        val c = ring()
+        val l = port.callListeners.single()
+        port.callState = NativeCallState.ACTIVE; port.call = c
+        l.onCallState(NativeCallState.ACTIVE, c)
+        assertFalse(heard.calls!!.reconnecting)
+        // The Android SDK's media dropped and is being restored.
+        port.callReconnecting = true
+        l.onCallReconnecting(true)
+        assertTrue("the shared state says the call is recovering", heard.calls!!.reconnecting)
+        port.callReconnecting = false
+        l.onCallReconnecting(false)
+        assertFalse("and that it is back", heard.calls!!.reconnecting)
+        // With no call there is nothing to recover, whatever a stale flag says.
+        port.callReconnecting = true
+        port.callState = NativeCallState.IDLE; port.call = null
+        l.onCallState(NativeCallState.IDLE, null)
+        assertFalse(heard.calls!!.reconnecting)
     }
 
     @Test

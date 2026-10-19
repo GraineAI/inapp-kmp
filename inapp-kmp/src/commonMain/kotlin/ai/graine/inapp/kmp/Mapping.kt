@@ -285,6 +285,8 @@ internal object Bridge {
             agent = str(o["agent"]),
             transport = GraineCallTransport.ofCall(str(o["transport"])),
             transportFallbackReason = str(o["transportFallbackReason"]),
+            // Only a true is a recovering call: an iOS SDK that predates it says nothing.
+            reconnecting = o["reconnecting"] == true,
         )
     }
 

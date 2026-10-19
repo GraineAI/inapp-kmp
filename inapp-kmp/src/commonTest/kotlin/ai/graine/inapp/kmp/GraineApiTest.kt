@@ -479,6 +479,17 @@ class GraineApiTest {
     }
 
     @Test
+    fun aRecoveringCallReachesTheCallScreenState() = runTest {
+        configured()
+        engine.sink.calls(GraineCallInfo(GraineCallState.ACTIVE, "c1", "Asha"))
+        assertFalse(Graine.calls.state.value.reconnecting)
+        engine.sink.calls(GraineCallInfo(GraineCallState.ACTIVE, "c1", "Asha", reconnecting = true))
+        assertTrue(Graine.calls.state.value.reconnecting, "the platform says the call is recovering")
+        engine.sink.calls(GraineCallInfo(GraineCallState.ACTIVE, "c1", "Asha"))
+        assertFalse(Graine.calls.state.value.reconnecting, "and then that it is back")
+    }
+
+    @Test
     fun outcomesReachEveryCollectorInOrder() = runTest {
         configured()
         val heard = async(UnconfinedTestDispatcher(testScheduler)) { Graine.calls.outcomes.take(2).toList() }
@@ -570,7 +581,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.11.0", GraineKmpVersion.NAME)
+        assertEquals("0.12.0", GraineKmpVersion.NAME)
     }
 
     @Test

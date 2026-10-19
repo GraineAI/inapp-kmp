@@ -169,6 +169,15 @@ class BridgeTest {
     }
 
     @Test
+    fun aRecoveringCallSaysSoAndAnOlderFacadeSaysNothing() {
+        assertTrue(Bridge.calls("""{"state":"active","callId":"c1","reconnecting":true}""").reconnecting)
+        assertFalse(Bridge.calls("""{"state":"active","callId":"c1","reconnecting":false}""").reconnecting)
+        assertFalse(Bridge.calls("""{"state":"active","callId":"c1"}""").reconnecting, "an iOS SDK that predates it says nothing: not recovering")
+        assertFalse(Bridge.calls("""{"state":"active","callId":"c1","reconnecting":"true"}""").reconnecting, "only a true is recovering")
+        assertFalse(GraineCallInfo().reconnecting)
+    }
+
+    @Test
     fun theCallSaysWhatItsAudioRunsOnAndWhyItFellBack() {
         val onWebRtc = Bridge.calls("""{"state":"active","callId":"c1","transport":"webrtc","transportFallbackReason":null}""")
         assertEquals(GraineCallTransport.WEBRTC, onWebRtc.transport)

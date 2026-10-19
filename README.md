@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.11.0")
-            implementation("ai.graine:inapp-kmp-compose:0.11.0")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.12.0")
+            implementation("ai.graine:inapp-kmp-compose:0.12.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -75,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.11.0`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.12.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.11.0'`
-  (or `pod 'GraineInApp', '~> 0.11.0'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.11.0"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.12.0'`
+  (or `pod 'GraineInApp', '~> 0.12.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.12.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -107,8 +107,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.11.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.11.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.12.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.12.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -363,8 +363,10 @@ agent's **In-app call audio** setting in the dashboard can switch WebRTC off for
 every install at once. A call WebRTC cannot set up goes on over the WebSocket
 inside the same call — no second ring, no error — and `Graine.calls.state` says
 which one carried it: `transport` (`WEBRTC` or `WEBSOCKET`) and
-`transportFallbackReason` (`no_answer`, `ice_timeout`, …). Over WebRTC the
-agent's voice arrives at telephone bandwidth today. Size, per phone: about
+`transportFallbackReason` (`no_answer`, `ice_timeout`, …). While a connected
+call recovers a dropped connection, `reconnecting` is `true` and the SDK's call
+screen says *Reconnecting…*. Over WebRTC the agent's voice arrives at telephone
+bandwidth today. Size, per phone: about
 12 MB installed on an iPhone, about 7.4 MB on a 64-bit Android phone. WebRTC is
 BSD 3-Clause with Google's patent grant — list it in your app's open-source
 licences.
@@ -472,8 +474,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.11.0 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.11.0 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.12.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.12.0 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

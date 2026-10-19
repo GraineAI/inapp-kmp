@@ -130,6 +130,12 @@ data class GraineCallInfo(
      * the dashboard's choice. Null when it did not fall back.
      */
     val transportFallbackReason: String? = null,
+    /**
+     * A connected call recovering its connection (its audio dropped and is
+     * being restored) — the call screen says "Reconnecting…". False again once
+     * the audio is back, and always false from a platform SDK that predates it.
+     */
+    val reconnecting: Boolean = false,
 ) {
     /** A call screen has something to show: a call, or a missed ring to call back. */
     val showsCallScreen: Boolean get() = state != GraineCallState.IDLE || missedCall != null
