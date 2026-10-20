@@ -1,3 +1,7 @@
+## 0.13.1
+
+- **A WebRTC call no longer redials while the agent is picking up.** On a slow connection the half-second wait for the agent to answer could start before the server had the call, so a call about to be answered was cancelled and dialled again: a longer *Connecting…*, and at times the agent's greeting captioned twice and an extra, empty call in the call history. The wait now starts once the server confirms it has the call, and a dial that must be made again is always ended on the server first, so each call is answered by one agent. Nothing to change in your app. Through the Android SDK 0.13.1 and, in the iOS app, `GraineInApp` and `GraineInAppRTC` 0.13.1.
+
 ## 0.13.0
 
 - **Chat window v2.** `GraineChat()` (and `GraineViews.chat()` on iOS) draws the chat style the dashboard sets (Chat window → Style): Classic — the chat as it has always looked, the default — Soft, Bold, Glass, Minimal, Crisp, Cozy, Calm, Compact or Lively, every piece tunable: the header, bubbles, times, wallpaper, chips, cards, composer, typing indicator, welcome, the end-of-chat rating and a call button. These are the Android and iOS SDKs' own windows, so nothing changes in your app; a design saved before draws exactly as it did.
