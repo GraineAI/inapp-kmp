@@ -1,6 +1,7 @@
 package ai.graine.inapp.kmp
 
 import ai.graine.inapp.kmp.objc.GraineObjC
+import ai.graine.inapp.kmp.objc.GraineObjCQuickReply
 import ai.graine.inapp.kmp.objc.GraineObjCRegistration
 import ai.graine.inapp.kmp.objc.GraineObjCScheduledCall
 import kotlinx.datetime.Instant
@@ -173,9 +174,36 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         if (error != null) done(Result.failure(failure(error))) else done(Result.success(Unit))
     }
 
+    // Chat window v2's controls, new in the facade after 0.10: a GraineInApp from before them has no pin, no
+    // rating and no paperclip to drive, and is left alone; its state (quick replies, the end, the rating, the
+    // pin) rides the chat's snapshot, which an older facade simply leaves out.
+    override fun chatPin(pin: GraineChatPin?) {
+        if (!facade.chat.respondsToSelector(PIN)) return
+        if (pin == null) facade.chat.clearPin() else facade.chat.pinWithTitle(pin.title, pin.subtitle, pin.imageUrl, pin.badge)
+    }
+
+    override fun chatRate(style: String, value: Int) {
+        if (facade.chat.respondsToSelector(RATE)) facade.chat.rateWithStyle(style, value.toLong())
+    }
+
+    /** The facade's own reply object while the agent still offers it; otherwise its words, which is all sending one does. */
+    override fun chatSendQuickReply(reply: GraineQuickReply) {
+        val offered = if (facade.chat.respondsToSelector(SEND_QUICK_REPLY)) {
+            facade.chat.quickReplies.filterIsInstance<GraineObjCQuickReply>().firstOrNull { it.label == reply.label && it.text == reply.text }
+        } else {
+            null
+        }
+        if (offered != null) facade.chat.sendQuickReply(offered) else facade.chat.send(reply.text)
+    }
+
+    override fun chatSetAttachHandler(handler: (() -> Unit)?) {
+        if (facade.chat.respondsToSelector(SET_ATTACH)) facade.chat.setAttachHandler(handler)
+    }
+
     private fun publishChat() {
         val chat = Bridge.chat(facade.chat.snapshotJSON)
         sink.chat(chat.turns, chat.status, chat.typing)
+        sink.chatExtras(chat.extras)
         sink.upcomingCalls(chat.upcoming)
     }
 
@@ -250,6 +278,11 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val CLEAR_CAPTIONS = NSSelectorFromString("clearCaptions")
         // New in the facade after 0.10.3 (asked for before each use).
         private val PREPARE_CALL = NSSelectorFromString("prepareCallJSONWithReason:variablesJSON:")
+        // Chat window v2's, new in the facade after 0.10 (asked for before each use).
+        private val PIN = NSSelectorFromString("pinWithTitle:subtitle:imageUrl:badge:")
+        private val RATE = NSSelectorFromString("rateWithStyle:value:")
+        private val SEND_QUICK_REPLY = NSSelectorFromString("sendQuickReply:")
+        private val SET_ATTACH = NSSelectorFromString("setAttachHandler:")
         private val OLD_IOS_SDK =
             "This app links a GraineInApp without the booking sheet. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
 

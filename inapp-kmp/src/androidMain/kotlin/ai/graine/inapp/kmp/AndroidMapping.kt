@@ -9,12 +9,15 @@ import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallTransport as NativeCallTransport
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
+import ai.graine.inapp.GraineChatPin as NativeChatPin
+import ai.graine.inapp.GraineChatRating as NativeChatRating
 import ai.graine.inapp.GraineChatSize as NativeChatSize
 import ai.graine.inapp.GraineChatTurn as NativeChatTurn
 import ai.graine.inapp.GraineConfig as NativeConfig
 import ai.graine.inapp.GraineError
 import ai.graine.inapp.GraineField as NativeField
 import ai.graine.inapp.GraineMemory as NativeMemory
+import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
 import ai.graine.inapp.GraineScreen as NativeScreen
 import ai.graine.inapp.GraineWidget
@@ -145,6 +148,22 @@ internal object AndroidMapping {
             channel = if (t.channel == NativeChatTurn.Channel.VOICE) GraineChatChannel.VOICE else GraineChatChannel.CHAT,
         )
     }
+
+    // Chat window v2: the same fields on both sides, one for one.
+
+    fun quickReply(r: NativeQuickReply): GraineQuickReply = GraineQuickReply(r.label, r.text)
+
+    fun quickReply(r: GraineQuickReply): NativeQuickReply = NativeQuickReply(r.label, r.text)
+
+    fun rating(r: NativeChatRating): GraineChatRating = GraineChatRating(r.value, r.scale, r.style)
+
+    fun pin(p: NativeChatPin): GraineChatPin = GraineChatPin(p.title, p.subtitle, p.imageUrl, p.badge)
+
+    fun pin(p: GraineChatPin): NativeChatPin = NativeChatPin(p.title, p.subtitle, p.imageUrl, p.badge)
+
+    /** The chat window v2 state the Android SDK's chat holds. */
+    fun extras(replies: List<NativeQuickReply>, ended: Boolean, rated: NativeChatRating?, pinned: NativeChatPin?): ChatExtras =
+        ChatExtras(replies.map { quickReply(it) }, ended, rated?.let { rating(it) }, pinned?.let { pin(it) })
 
     /** A component the Android SDK adopted, as the shared one: what it is, and all of it as plain values. */
     fun component(w: GraineWidget): GraineComponent {

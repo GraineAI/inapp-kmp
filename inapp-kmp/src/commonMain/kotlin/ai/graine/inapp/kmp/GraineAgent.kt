@@ -56,8 +56,26 @@ class GraineAgent internal constructor(
     internal val chatStatus = MutableStateFlow(GraineChatStatus.IDLE)
     internal val chatTyping = MutableStateFlow(false)
     internal val chatUpcoming = MutableStateFlow<List<GraineScheduledCall>>(emptyList())
+    internal val chatQuickReplies = MutableStateFlow<List<GraineQuickReply>>(emptyList())
+    internal val chatEnded = MutableStateFlow(false)
+    internal val chatRating = MutableStateFlow<GraineChatRating?>(null)
+    internal val chatPinned = MutableStateFlow<GraineChatPin?>(null)
     internal val voiceInfo = MutableStateFlow(GraineVoiceInfo())
     internal val themeState = MutableStateFlow<GraineThemeTokens?>(null)
+
+    /** The app's [GraineChat.onRated]. */
+    @Volatile
+    internal var ratedHandler: ((GraineChatRating) -> Unit)? = null
+
+    /** The app's [GraineChat.onAttach]: kept here, so one set before configure() reaches the engine when it is made. */
+    @Volatile
+    internal var attachHandler: (() -> Unit)? = null
+        private set
+
+    internal fun setAttachHandler(handler: (() -> Unit)?) {
+        attachHandler = handler
+        current?.chatSetAttachHandler(handler)
+    }
 
     /** This agent's configuration, once it has loaded; null before. */
     val session: StateFlow<GraineSession?> = sessionState.asStateFlow()
@@ -90,6 +108,7 @@ class GraineAgent internal constructor(
         claimed = true
         current = engine
         engine.start(sink)
+        attachHandler?.let { engine.chatSetAttachHandler(it) }
     }
 
     internal fun engineOrNull(): GraineEngine? = current
@@ -257,6 +276,17 @@ class GraineAgent internal constructor(
             chatTyping.value = typing
         }
 
+        override fun chatExtras(extras: ChatExtras) {
+            val before = chatRating.value
+            chatQuickReplies.value = extras.quickReplies
+            chatEnded.value = extras.ended
+            chatRating.value = extras.rating
+            chatPinned.value = extras.pinned
+            // A rating given — in the chat window or through rate() — is heard once; the platform repeats its state.
+            val rated = extras.rating
+            if (rated != null && rated != before) ratedHandler?.let { runCatching { it(rated) } }
+        }
+
         override fun upcomingCalls(calls: List<GraineScheduledCall>) {
             chatUpcoming.value = calls
         }
@@ -285,6 +315,12 @@ class GraineAgent internal constructor(
         chatStatus.value = GraineChatStatus.IDLE
         chatTyping.value = false
         chatUpcoming.value = emptyList()
+        chatQuickReplies.value = emptyList()
+        chatEnded.value = false
+        chatRating.value = null
+        chatPinned.value = null
+        ratedHandler = null
+        attachHandler = null
         voiceInfo.value = GraineVoiceInfo()
         themeState.value = null
     }

@@ -19,8 +19,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, nullable) NSString *reason;
 @end
 
+@interface GraineObjCQuickReply : NSObject
+@property (nonatomic, readonly) NSString *label;
+@property (nonatomic, readonly) NSString *text;
+@end
+
 @interface GraineObjCChat : NSObject
 @property (nonatomic, readonly) NSString *snapshotJSON;
+@property (nonatomic, readonly) NSArray<GraineObjCQuickReply *> *quickReplies;
 - (void)open;
 - (void)openWithSize:(nullable NSString *)size;
 - (void)newConversationWithCompletion:(void (^)(NSError * _Nullable error))completion;
@@ -31,6 +37,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)answerWidgetWithId:(NSString *)widgetId dataJSON:(nullable NSString *)dataJSON summary:(NSString *)summary;
 - (void)refreshUpcomingCalls;
 - (void)cancelUpcomingCall:(NSString *)callId;
+- (void)sendQuickReply:(GraineObjCQuickReply *)reply;
+- (void)rateWithStyle:(NSString *)style value:(NSInteger)value;
+- (void)pinWithTitle:(NSString *)title subtitle:(nullable NSString *)subtitle imageUrl:(nullable NSString *)imageUrl badge:(nullable NSString *)badge;
+- (void)clearPin;
+- (void)setAttachHandler:(void (^ _Nullable)(void))handler;
 - (GraineObjCRegistration *)observe:(void (^)(void))observer;
 @end
 

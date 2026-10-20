@@ -1,10 +1,15 @@
 package ai.graine.inapp.kmp
 
 import ai.graine.inapp.kmp.objc.GraineObjC
+import kotlinx.cinterop.BetaInteropApi
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import platform.Foundation.NSRecursiveLock
+import platform.Foundation.NSString
+import platform.Foundation.create
+import platform.Foundation.precomposedStringWithCanonicalMapping
 import platform.UIKit.UIViewController
+import kotlin.math.pow
 
 internal actual fun createPlatformEngine(config: GraineConfig, name: String): GraineEngine {
     val variables = Bridge.json(config.variables.takeIf { it.isNotEmpty() })
@@ -38,6 +43,12 @@ internal actual class GraineLock actual constructor() {
 }
 
 internal actual val graineMainDispatcher: CoroutineDispatcher = Dispatchers.Main
+
+/** The system's pow, as the iOS SDK reckons the chat's colours. */
+internal actual fun platformPow(x: Double, y: Double): Double = x.pow(y)
+
+@OptIn(BetaInteropApi::class)
+internal actual fun composed(text: String): String = NSString.create(string = text).precomposedStringWithCanonicalMapping
 
 /** iOS rings through PushKit: the SDK registers the VoIP token itself (`Graine.calls.enableVoIPPushes()`), so there is nothing to hand over. */
 internal actual object PlatformPush {

@@ -4,6 +4,7 @@ import ai.graine.inapp.ResolvedDesign
 import ai.graine.inapp.ThemeTokens
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -14,7 +15,9 @@ import java.io.File
  * The brand's tokens on Android: every design in the shared contract
  * (sdk/contract/design.json), as the Android SDK resolves it, crosses into
  * [GraineThemeTokens] whole — the Android SDK's `ThemeTokens.toJson()` read
- * by the shared parser.
+ * by the shared parser — and the chat window v2 pieces of each read exactly
+ * as the contract sends them, or derived as the classic chat from the v1
+ * tokens when a server sends none.
  */
 class AndroidThemeTest {
 
@@ -35,6 +38,88 @@ class AndroidThemeTest {
             }
         }
         assertTrue("the contract has designs", crossed >= 2)
+    }
+
+    // ── chat window v2 ────────────────────────────────────────────────────
+
+    private class Case(val index: Int, val config: Map<*, *>, val design: Map<*, *>)
+
+    /** design.json's cases, as the shared JSON reader has them; null in an exported checkout. */
+    private fun cases(): List<Case>? {
+        val dir = System.getProperty("graine.contractDir") ?: return null
+        val contract = Json.obj(File(dir, "design.json").readText()) ?: error("design.json is not a JSON object")
+        return (contract["cases"] as List<*>).mapIndexedNotNull { i, c ->
+            val case = c as Map<*, *>
+            (case["design"] as? Map<*, *>)?.let { Case(i, case["config"] as? Map<*, *> ?: emptyMap<Any?, Any?>(), it) }
+        }
+    }
+
+    /** A token set with its chat's v2 groups taken out: what a server older than v2 sends. */
+    private fun stripped(tokens: Map<*, *>): Map<String, Any?> = tokens.entries.associate { (k, v) ->
+        k.toString() to if (k == "chat") (v as Map<*, *>).filterKeys { it !in ChatStyles.KEYS } else v
+    }
+
+    /** Whether the brand turned any v2 knob (a style other than classic counts) — Android's ChatStyleTest's rule. */
+    private fun hasV2Knobs(config: Map<*, *>): Boolean {
+        val chat = config["chat"] as? Map<*, *> ?: return false
+        return chat.keys.any { k ->
+            when (k) {
+                "preset" -> chat["preset"] != "classic"
+                "header" -> chat["header"] is Map<*, *>
+                in ChatStyles.KEYS -> true
+                else -> false
+            }
+        }
+    }
+
+    @Test
+    fun everyDesignsChatPiecesAreReadExactlyAsTheContractSendsThemAndAsTheAndroidSdkHandsThemOver() {
+        val cases = cases()
+        assumeTrue("an exported checkout carries no contract folder", cases != null)
+        var read = 0
+        for (c in cases!!) {
+            val native = ResolvedDesign.parse(Json.write(c.design)) ?: error("case ${c.index}: the Android SDK read no design")
+            for ((scheme, nativeTokens) in listOf("light" to native.light, "dark" to native.dark)) {
+                val why = "case ${c.index} $scheme"
+                val tokens = c.design[scheme] as Map<*, *>
+                val sent = ChatPiecesWire.groupsOf(tokens["chat"] as Map<*, *>)
+                assertEquals("$why: a v2 server sends every group", ChatStyles.KEYS.toSet(), sent.keys)
+                // The contract's token JSON — the shape the iOS facade's themeJSON hands over.
+                assertEquals("$why, read", sent, ChatPiecesWire.of(ThemeBridge.parse(Json.write(tokens))!!.chat!!))
+                // The Android SDK's tokens, written back (ThemeTokens.toJson), read by the shared parser.
+                assertEquals("$why, from the Android SDK", sent, ChatPiecesWire.of(ThemeBridge.parse(nativeTokens.toJson().toString())!!.chat!!))
+                read++
+            }
+        }
+        assertEquals("every case, light and dark", 2 * cases.size, read)
+        assertTrue("the contract's 48 designs", cases.size >= 48)
+    }
+
+    @Test
+    fun anOlderServersChatIsTheClassicChatItsV1TokensImplyOnBothPaths() {
+        val cases = cases()
+        assumeTrue("an exported checkout carries no contract folder", cases != null)
+        var compared = 0
+        for (c in cases!!) {
+            val old = c.design.entries.associate { (k, v) -> k.toString() to if (k == "light" || k == "dark") stripped(v as Map<*, *>) else v }
+            val native = ResolvedDesign.parse(Json.write(old)) ?: error("case ${c.index}: the Android SDK read no design")
+            for ((scheme, nativeTokens) in listOf("light" to native.light, "dark" to native.dark)) {
+                val why = "case ${c.index} $scheme"
+                val derived = ThemeBridge.parse(Json.write(old[scheme]))!!.chat!!
+                assertEquals(why, "classic", derived.preset)
+                // The Android SDK writes back only what the server sent: the shared parser derives the same chat from it.
+                val written = nativeTokens.toJson()
+                assertFalse("$why: no groups written back", written.getJSONObject("chat").has("header"))
+                assertEquals("$why, from the Android SDK", ChatPiecesWire.of(derived), ChatPiecesWire.of(ThemeBridge.parse(written.toString())!!.chat!!))
+                // A design with no v2 knobs: exactly the groups a v2 server sends for it.
+                if (!hasV2Knobs(c.config)) {
+                    compared++
+                    assertEquals("$why, classic", ChatPiecesWire.groupsOf((c.design[scheme] as Map<*, *>)["chat"] as Map<*, *>), ChatPiecesWire.of(derived))
+                }
+            }
+        }
+        // Every case from before v2, both schemes, and classic itself.
+        assertTrue("compared $compared", compared >= 2 * 32)
     }
 
     private fun assertCrossed(why: String, n: ThemeTokens, t: GraineThemeTokens) {

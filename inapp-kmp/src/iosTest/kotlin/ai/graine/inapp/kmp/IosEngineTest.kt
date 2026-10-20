@@ -37,6 +37,8 @@ class IosEngineTest {
         override fun sessionFailed(message: String) { failures += message }
         override fun event(event: GraineEvent) { events += event }
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) { chat = Triple(turns, status, typing) }
+        var extras: ChatExtras? = null
+        override fun chatExtras(extras: ChatExtras) { this.extras = extras }
         var upcoming: List<GraineScheduledCall> = emptyList()
         override fun upcomingCalls(calls: List<GraineScheduledCall>) { upcoming = calls }
         override fun calls(info: GraineCallInfo) { calls = info }
@@ -151,6 +153,27 @@ class IosEngineTest {
         assertTrue(result?.isSuccess == true, "nothing was kept for nobody, so nothing to refuse: $result")
         spinUntil { heard.chat?.first?.isEmpty() == true }
         assertEquals(emptyList(), heard.chat?.first, "the chat on screen cleared")
+    }
+
+    @Test
+    fun theChatWindowsControlsReachTheFacadeAndItsStateComesBackWithTheChat() {
+        val pin = GraineChatPin("Your plan", "Renews on 14 Nov", "https://example.com/p.png", "Active")
+        engine.chatPin(pin)
+        spinUntil { heard.extras?.pinned != null }
+        assertEquals(pin, heard.extras?.pinned, "pinWithTitle:subtitle:imageUrl:badge:, back in the chat's snapshot")
+        engine.chatPin(null)
+        spinUntil { heard.extras?.pinned == null }
+        assertNull(heard.extras?.pinned, "clearPin")
+        // The paperclip's handler is the facade's to hold; nobody taps it here.
+        engine.chatSetAttachHandler {}
+        engine.chatSetAttachHandler(null)
+        // No conversation ended: a rating is not taken. A quick reply is the user's own message.
+        engine.chatRate("stars", 4)
+        engine.chatSendQuickReply(GraineQuickReply("Yes", "Yes, please"))
+        spinUntil { heard.chat?.first?.any { it.text == "Yes, please" } == true }
+        assertEquals(GraineRole.USER, heard.chat?.first?.lastOrNull { it.text == "Yes, please" }?.role)
+        assertNull(heard.extras?.rating)
+        assertEquals(false, heard.extras?.ended)
     }
 
     @Test

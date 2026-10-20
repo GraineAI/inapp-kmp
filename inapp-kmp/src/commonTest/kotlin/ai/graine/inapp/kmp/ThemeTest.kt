@@ -171,6 +171,191 @@ class ThemeTest {
         assertNull(ThemeBridge.parse("""{"colors":{"background":"#000000"}}"""), "colours half there are no colours")
     }
 
+    // ── chat window v2 ────────────────────────────────────────────────────
+
+    /** Graine Classic in light, as the contract's first design has it — with only the v1 chat words, as a server from before v2 sends it. */
+    private fun classicLight(extra: String = ""): String = """{"v":1,"preset":"graine-classic","scheme":"light",
+        "colors":{"background":"#F7F7F5","surface":"#FFFFFF","surfaceRaised":"#FFFFFF","text":"#101318","textMuted":"#5F6672",
+            "border":"#E5E4E0","accent":"#318CE7","onAccent":"#FFFFFF","accentSoft":"#E6F1FC","success":"#16A34A","warning":"#B45309",
+            "danger":"#DC2626","userBubble":"#318CE7","userBubbleText":"#FFFFFF","agentBubble":"#F1F1EF","agentBubbleText":"#101318",
+            "scrim":"#000000"},
+        "shape":{"radius":{"sm":8,"md":12,"lg":18,"xl":24},"borderWidth":1,"launcher":"circle"},
+        "spacing":{"unit":4,"cardPadding":14,"gap":10},
+        "elevation":{"card":{"y":2,"blur":8,"spread":0,"opacity":0.08,"color":"#000000"},"floating":null,"hardOffset":null},
+        "bubbles":"filled",
+        "chat":{"title":"","subtitle":"","avatar":"logo","placeholder":"Message…","showTimestamps":false,"suggestions":[],
+            "background":"#F7F7F5","pattern":"none","patternColor":"#E0E0DF","headerBackground":"#FFFFFF","headerText":"#101318",
+            "headerSubtext":"#5F6672","composerBackground":"#FFFFFF","composerText":"#101318","composerPlaceholder":"#5F6672",
+            "composerBorder":"#E5E4E0"$extra}}"""
+
+    private fun chatOf(json: String): GraineThemeTokens.Chat = ThemeBridge.parse(json)!!.chat!!
+
+    @Test
+    fun anOlderServersChatIsTheClassicChatItsV1TokensImply() {
+        // The pieces a v2 server sends for Graine Classic (design.json, the first case, light), derived here from the v1 tokens.
+        val c = chatOf(classicLight())
+        val shadow = GraineThemeTokens.Shadow(2.0, 8.0, 0.0, 0.08, "#000000")
+        assertEquals("classic", c.preset)
+        assertEquals(
+            GraineThemeTokens.Chat.Header("surface", "start", "online", false, "bar", GraineThemeTokens.Chat.Fill("#FFFFFF", null, "#101318", "#5F6672"), "#16A34A", true),
+            c.header,
+        )
+        assertEquals(
+            GraineThemeTokens.Chat.Bubbles(
+                "rounded", 18.0, 8.0, false, 0.84, null,
+                GraineThemeTokens.Chat.BubbleSide("#318CE7", null, "#FFFFFF", "#FFFFFF", null, false, "#FFFFFF"),
+                GraineThemeTokens.Chat.BubbleSide("#F1F1EF", null, "#101318", "#545659", null, false, "#101318"),
+            ),
+            c.bubbles,
+            "the quiet words and the links as the server checks them against the bubble",
+        )
+        assertEquals(GraineThemeTokens.Chat.Timestamps("never", "below", false), c.timestamps)
+        assertEquals(GraineThemeTokens.Chat.Wallpaper("solid", "#F7F7F5", null, "none", "#E0E0DF", 0.5, "#101318", "#5F6672"), c.wallpaper)
+        assertEquals(GraineThemeTokens.Chat.Chips("outline", "both", "wrap", 34.0, 17.0, "#F7F7F5", "#101318", "#318CE7", 1.0, null), c.chips)
+        assertEquals(GraineThemeTokens.Chat.Cards(18.0, shadow, false, true, "auto", "filled", "#318CE7", "#FFFFFF", null), c.cards)
+        assertEquals(
+            GraineThemeTokens.Chat.Composer(
+                "bar", false, false, "circle", "#FFFFFF", "#101318", "#5F6672", "#E5E4E0", "#F7F7F5", null, 40.0, 24.0, "#318CE7", "#FFFFFF", "#318CE7",
+            ),
+            c.composer,
+        )
+        assertEquals(GraineThemeTokens.Chat.Typing("loader", "", "#318CE7"), c.typing)
+        assertEquals(GraineThemeTokens.Chat.Density("comfortable", 10.0, 3.0, 14.0, 11.0, 12.0), c.density)
+        assertEquals(GraineThemeTokens.Chat.Welcome("centered", "chips"), c.welcome)
+        assertEquals(GraineThemeTokens.Chat.Rating(false, "thumbs", ""), c.rating)
+        assertEquals(GraineThemeTokens.Chat.Escalation("none"), c.escalation)
+        assertNull(c.glass)
+    }
+
+    @Test
+    fun aChatMadeByHandCarriesGraineClassicsPieces() {
+        val parsed = chatOf(classicLight())
+        val made = GraineThemeTokens.Chat(
+            title = "", subtitle = "", avatar = "logo", placeholder = "Message…", showTimestamps = false, suggestions = emptyList(),
+            background = "#F7F7F5", pattern = "none", patternColor = "#E0E0DF", headerBackground = "#FFFFFF", headerText = "#101318",
+            headerSubtext = "#5F6672", composerBackground = "#FFFFFF", composerText = "#101318", composerPlaceholder = "#5F6672",
+            composerBorder = "#E5E4E0", size = null, showUpcomingCalls = true, upcomingTitle = "", showHistory = true, newConversation = true,
+        )
+        assertEquals(ChatPiecesWire.of(parsed), ChatPiecesWire.of(made))
+    }
+
+    @Test
+    fun theClassicChatFollowsTheDesignsV1Words() {
+        val outline = chatOf(classicLight().replace("\"bubbles\":\"filled\"", "\"bubbles\":\"outline\"")).bubbles
+        assertNull(outline.user.color, "outline: no fill")
+        assertEquals(listOf("#318CE7", "#E5E4E0"), listOf(outline.user.border, outline.agent.border), "the user's in the accent, the agent's in the border")
+        val minimal = chatOf(classicLight().replace("\"bubbles\":\"filled\"", "\"bubbles\":\"minimal\"")).bubbles
+        assertEquals("#E6F1FC", minimal.user.color)
+        assertTrue(minimal.agent.bare, "minimal: the agent's words on the page")
+        val accent = chatOf(classicLight().replace("\"headerBackground\":\"#FFFFFF\"", "\"headerBackground\":\"#318CE7\"")
+            .replace("\"headerText\":\"#101318\"", "\"headerText\":\"#FFFFFF\"")).header
+        assertEquals("accent", accent.style, "a header in a colour other than the surface is an accent header")
+        assertEquals("#FFFFFF", accent.dot, "its dot in the header's words")
+        val v1 = chatOf(classicLight().replace("\"showTimestamps\":false", "\"showTimestamps\":true").replace("\"pattern\":\"none\"", "\"pattern\":\"dots\""))
+        assertEquals("always", v1.timestamps.show)
+        assertEquals(listOf("pattern", "dots"), listOf(v1.wallpaper.style, v1.wallpaper.pattern))
+    }
+
+    /** Every group, nothing classic about it, as a v2 server writes it. */
+    private val everyKnob = ""","preset":"lively",
+        "header":{"style":"gradient","align":"center","status":"text","typingStatus":true,"contextCard":"card",
+            "fill":{"color":"#318CE7","colorTo":"#1E5FA0","text":"#FFFFFF","textMuted":"#E0ECFA"},"dot":"#FFFFFF","divider":false},
+        "bubbles":{"shape":"tail","radius":20,"tightRadius":6,"grouping":true,"maxWidth":0.8,
+            "shadow":{"y":1,"blur":3,"spread":0,"opacity":0.1,"color":"#000000"},
+            "user":{"color":"#318CE7","colorTo":"#1E5FA0","text":"#FFFFFF","textMuted":"#DCE9F9","border":null,"bare":false,"link":"#FFFFFF"},
+            "agent":{"color":null,"colorTo":null,"text":"#101318","textMuted":"#5F6672","border":"#E5E4E0","bare":false,"link":"#318CE7"}},
+        "timestamps":{"show":"group","style":"inside","ticks":true},
+        "wallpaper":{"style":"gradient","color":"#F7F7F5","colorTo":"#E6F1FC","pattern":"none","patternColor":"#DADAD8","intensity":0.7,
+            "text":"#101318","textMuted":"#5F6672"},
+        "chips":{"style":"elevated","placement":"above-composer","scroll":"row","height":36,"radius":12,"fill":"#FFFFFF","text":"#101318",
+            "border":"#E5E4E0","borderWidth":1,"shadow":{"y":2,"blur":8,"spread":0,"opacity":0.08,"color":"#000000"}},
+        "cards":{"radius":14,"shadow":null,"hard":false,"border":false,"image":"wide","button":"tonal","buttonFill":"#E6F1FC",
+            "buttonText":"#101318","buttonBorder":null},
+        "composer":{"style":"floating","mic":true,"attach":true,"send":"icon","fill":"#FFFFFF","text":"#101318","placeholder":"#5F6672",
+            "border":"#E5E4E0","strip":null,"shadow":{"y":6,"blur":20,"spread":0,"opacity":0.12,"color":"#000000"},"height":48,"radius":24,
+            "sendFill":null,"sendIcon":"#1F6FBF","icon":"#318CE7"},
+        "typing":{"style":"wave","text":"Thinking…","color":"#5F6672"},
+        "density":{"name":"spacious","gap":14,"groupGap":4,"padX":16,"padY":13,"edge":16},
+        "welcome":{"layout":"hero","starters":"list"},
+        "rating":{"show":true,"style":"emoji","prompt":"How did we do?"},
+        "escalation":{"call":"header"},
+        "glass":{"blur":24,"opacity":0.6}"""
+
+    @Test
+    fun aV2ServersPiecesAreReadFieldByField() {
+        val c = chatOf(classicLight(everyKnob))
+        val sent = ChatPiecesWire.groupsOf(Json.obj(classicLight(everyKnob))!!["chat"] as Map<*, *>)
+        assertEquals(sent, ChatPiecesWire.of(c), "every field, exactly as sent")
+        assertEquals("#1E5FA0", c.header.fill.colorTo)
+        assertNull(c.bubbles.agent.color, "null is no fill")
+        assertNull(c.composer.strip, "null is no strip: the floating composer")
+        assertEquals(GraineThemeTokens.Chat.Glass(24.0, 0.6), c.glass)
+        // The v1 words beside them are untouched.
+        assertEquals("#F7F7F5", c.background)
+        assertEquals("Message…", c.placeholder)
+    }
+
+    @Test
+    fun aFieldMissingOrOfTheWrongTypeIsClassicsAndAnUnknownWordIsTheFirstListed() {
+        val k = chatOf(classicLight())
+        val c = chatOf(classicLight(""","preset":"  bold ",
+            "header":{"style":"sparkly","typingStatus":"yes","fill":{"color":"#abc","text":7}},
+            "bubbles":{"shape":"blob","radius":"big","maxWidth":3,"user":{"color":"blue"},"shadow":{"y":4}},
+            "timestamps":{"show":1},"wallpaper":{"pattern":"stripes","colorTo":null},
+            "chips":{"placement":"floating","borderWidth":-2},"cards":{"shadow":{"opacity":0.3}},
+            "composer":{"style":"orb","strip":null,"sendFill":"#abc"},
+            "typing":"dots","glass":"frosted""""))
+        assertEquals("bold", c.preset, "trimmed")
+        assertEquals("surface", c.header.style, "a word this build does not know: the first listed")
+        assertEquals(k.header.align, c.header.align, "absent: classic's")
+        assertEquals(k.header.typingStatus, c.header.typingStatus, "the wrong type: classic's")
+        assertEquals("#AABBCC", c.header.fill.color, "a colour in any hex spelling, as #RRGGBB")
+        assertEquals(k.header.fill.text, c.header.fill.text)
+        assertEquals("rounded", c.bubbles.shape)
+        assertEquals(k.bubbles.radius, c.bubbles.radius)
+        assertEquals(0.92, c.bubbles.maxWidth, "a share past its range is held to it")
+        assertEquals(k.bubbles.user.color, c.bubbles.user.color, "a colour that is not one: classic's")
+        assertEquals(GraineThemeTokens.Shadow(4.0, 0.0, 0.0, 0.0, "#000000"), c.bubbles.shadow, "a shadow over classic's, which is none")
+        assertEquals(k.timestamps, c.timestamps)
+        assertEquals("dots", c.wallpaper.pattern, "a pattern this build does not know is its dots")
+        assertNull(c.wallpaper.colorTo)
+        assertEquals("both", c.chips.placement)
+        assertEquals(0.0, c.chips.borderWidth)
+        assertEquals(GraineThemeTokens.Shadow(2.0, 8.0, 0.0, 0.3, "#000000"), c.cards.shadow, "a shadow over classic's: the card's own")
+        assertEquals("bar", c.composer.style)
+        assertNull(c.composer.strip, "null is none")
+        assertEquals("#AABBCC", c.composer.sendFill)
+        assertEquals(k.typing, c.typing, "a group that is not one: all classic")
+        assertEquals(k.glass, c.glass)
+    }
+
+    @Test
+    fun oneGroupAloneIsAV2ServerAndTheRestIsClassic() {
+        val k = chatOf(classicLight())
+        val c = chatOf(classicLight(""","rating":{"show":true,"style":"stars"}"""))
+        assertEquals(GraineThemeTokens.Chat.Rating(true, "stars", ""), c.rating)
+        assertEquals(ChatPiecesWire.of(k.copy(rating = c.rating)), ChatPiecesWire.of(c))
+        val frosted = chatOf(classicLight(""","glass":{}"""))
+        assertEquals(GraineThemeTokens.Chat.Glass(20.0, 0.72), frosted.glass, "an object is glass: the fields it lacks, Graine Classic's frost")
+        assertNull(chatOf(classicLight(""","glass":null""")).glass)
+    }
+
+    @Test
+    fun everyWordAPieceAllowsStartsWithTheOneDrawnForAWordItDoesNotKnow() {
+        // DESIGN.md "Chat window v2": surface, rounded, never, solid, dots, outline, both, wrap, auto, filled, bar, circle,
+        // loader, comfortable, centered, chips, thumbs, none, bar.
+        assertEquals(
+            listOf("surface", "start", "online", "bar", "rounded", "never", "below", "solid", "dots", "outline", "both", "wrap", "auto",
+                "filled", "bar", "circle", "loader", "comfortable", "centered", "chips", "thumbs", "none"),
+            with(ChatStyles) {
+                listOf(HEADER_STYLES, HEADER_ALIGNS, STATUS_LINES, CONTEXT_CARDS, BUBBLE_SHAPES, TIMESTAMP_SHOWS, TIMESTAMP_STYLES,
+                    WALLPAPER_STYLES, PATTERNS, CHIP_STYLES, CHIP_PLACEMENTS, CHIP_SCROLLS, CARD_IMAGES, CARD_BUTTONS, COMPOSER_STYLES,
+                    SEND_STYLES, TYPING_STYLES, DENSITIES, WELCOME_LAYOUTS, STARTER_LOOKS, RATING_STYLES, CALL_BUTTONS).map { it.first() }
+            },
+        )
+        assertTrue("none" in ChatStyles.PATTERNS, "no pattern is a word the tokens carry")
+    }
+
     @Test
     fun aValueOfTheWrongTypeTakesAPlainDefaultNeverACrash() {
         val t = ThemeBridge.parse("""{"colors":$colors,"font":"big","motion":{"durationMs":"fast"},"scheme":"sepia","glass":7}""")!!

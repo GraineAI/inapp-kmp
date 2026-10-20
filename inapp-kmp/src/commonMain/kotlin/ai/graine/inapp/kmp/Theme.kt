@@ -133,7 +133,18 @@ data class GraineThemeTokens(
     /** [colors.surface] at [surfaceOpacity], what is behind blurred by [blur] where the platform can. */
     data class Glass(val blur: Double, val surfaceOpacity: Double)
 
-    /** The chat window, resolved. An empty word means the SDK's own default (the heading, "Online"…). */
+    /**
+     * The chat window, resolved. An empty word means the SDK's own default (the heading, "Online"…).
+     *
+     * From [preset] on, every piece of the window — header, bubbles, times,
+     * wallpaper, chips, cards, composer, typing indicator, density, welcome,
+     * rating, call button and glass — as the dashboard's chat style and knobs
+     * resolved them (Chat window → Style). From a server that sends none of
+     * them they are the classic chat these very tokens imply, the chat as it
+     * has always been drawn, so there is always one set to draw from. A
+     * `Chat` made by hand carries Graine Classic's classic chat (light)
+     * unless it says otherwise.
+     */
     data class Chat(
         val title: String,
         val subtitle: String,
@@ -164,7 +175,225 @@ data class GraineThemeTokens(
         val showHistory: Boolean,
         /** The header's New conversation control. */
         val newConversation: Boolean,
-    )
+        /** The chat style the pieces below came from — informational: they are resolved. `classic` from an older server. */
+        val preset: String = ChatStyles.graineClassic.preset,
+        val header: Header = ChatStyles.graineClassic.header,
+        val bubbles: Bubbles = ChatStyles.graineClassic.bubbles,
+        val timestamps: Timestamps = ChatStyles.graineClassic.timestamps,
+        val wallpaper: Wallpaper = ChatStyles.graineClassic.wallpaper,
+        val chips: Chips = ChatStyles.graineClassic.chips,
+        val cards: Cards = ChatStyles.graineClassic.cards,
+        val composer: Composer = ChatStyles.graineClassic.composer,
+        val typing: Typing = ChatStyles.graineClassic.typing,
+        val density: Density = ChatStyles.graineClassic.density,
+        val welcome: Welcome = ChatStyles.graineClassic.welcome,
+        val rating: Rating = ChatStyles.graineClassic.rating,
+        val escalation: Escalation = ChatStyles.graineClassic.escalation,
+        /** Frosted pieces; null: solid ones. */
+        val glass: Glass? = null,
+    ) {
+        /** A fill — one colour, or a gradient — and the words that read on all of it. */
+        data class Fill(
+            val color: String,
+            /** The gradient's far end; null: one solid colour. */
+            val colorTo: String?,
+            val text: String,
+            /** Quieter words on it: the status line. */
+            val textMuted: String,
+        )
+
+        /** The header: its fill, how its title sits, its status line, and where the app's pinned card goes. */
+        data class Header(
+            /** `surface`, `accent`, `gradient` (leading → trailing edge) or `plain` (no fill: the wallpaper runs under it). */
+            val style: String,
+            /** `start` or `center`. */
+            val align: String,
+            /** Under the title: `online` (a dot, then the words), `text` (the words alone) or `none`. */
+            val status: String,
+            /** While the agent works on a reply, the status line says so. */
+            val typingStatus: Boolean,
+            /** Where a pinned card ([GraineChat.pin]) goes: `bar` under the header, `card` atop the thread, or `none`. */
+            val contextCard: String,
+            val fill: Fill,
+            /** The online dot. */
+            val dot: String,
+            /** A hairline in `colors.border` under it. */
+            val divider: Boolean,
+        )
+
+        /** One side's bubbles. */
+        data class BubbleSide(
+            /** The fill; null: transparent. */
+            val color: String?,
+            /** A gradient's far end, top → bottom; null: solid. */
+            val colorTo: String?,
+            val text: String,
+            /** A time or a mark inside the bubble. */
+            val textMuted: String,
+            /** An outline; null: none. */
+            val border: String?,
+            /** No bubble at all: the words on the wallpaper. */
+            val bare: Boolean,
+            /** Links in the words (always underlined). */
+            val link: String,
+        )
+
+        data class Bubbles(
+            /** `rounded`, `squircle`, `tail` or `flat`. */
+            val shape: String,
+            val radius: Double,
+            /** The corner nearest the speaker, and a group's inner corners. */
+            val tightRadius: Double,
+            /** A run of messages from one side drawn as one group. */
+            val grouping: Boolean,
+            /** The widest a bubble may be, as a share of the thread's width (0.6–0.92). */
+            val maxWidth: Double,
+            /** Null: none. */
+            val shadow: Shadow?,
+            /** The user's bubbles. */
+            val user: BubbleSide,
+            val agent: BubbleSide,
+        )
+
+        data class Timestamps(
+            /** `never`, `group` (the last message of each group) or `always`. */
+            val show: String,
+            /** `below` the bubble or `inside` it. */
+            val style: String,
+            /** A waiting / sent / not-sent mark beside the user's times. */
+            val ticks: Boolean,
+        )
+
+        /** Behind the thread — and behind a `plain` header and a `floating` composer. */
+        data class Wallpaper(
+            /** `solid`, `gradient` (top → bottom) or `pattern`. */
+            val style: String,
+            /** The colour, or the gradient's top. */
+            val color: String,
+            /** The gradient's bottom; null unless a gradient. */
+            val colorTo: String?,
+            /** `none`, `dots`, `grid` or `diagonal`. */
+            val pattern: String,
+            val patternColor: String,
+            /** How strong the gradient or the pattern is, 0–1 (already in the colours). */
+            val intensity: Double,
+            /** Words straight on it: a bare bubble, the welcome's title. */
+            val text: String,
+            /** Day lines, times under bubbles. */
+            val textMuted: String,
+        )
+
+        /** The brand's starters and the agent's quick replies: one look. */
+        data class Chips(
+            /** `outline`, `filled`, `soft` or `elevated`. */
+            val style: String,
+            /** `both` (starters docked, quick replies in the thread), `inline` or `above-composer`. */
+            val placement: String,
+            /** `wrap` (rows that wrap) or `row` (one row that scrolls sideways). */
+            val scroll: String,
+            val height: Double,
+            val radius: Double,
+            val fill: String,
+            val text: String,
+            /** Null: no outline. */
+            val border: String?,
+            val borderWidth: Double,
+            val shadow: Shadow?,
+        )
+
+        /** The agent's components, the upcoming-calls card, a pinned card and the rating card. */
+        data class Cards(
+            val radius: Double,
+            val shadow: Shadow?,
+            /** The design's hard offset instead of a shadow. */
+            val hard: Boolean,
+            /** An outline in `colors.border`. */
+            val border: Boolean,
+            /** A component's large image: `auto` (its own height), `square`, `landscape` or `wide`. */
+            val image: String,
+            /** A component's main button: `filled`, `outline`, `tonal` or `text`. */
+            val button: String,
+            /** Null: no fill. */
+            val buttonFill: String?,
+            val buttonText: String,
+            val buttonBorder: String?,
+        )
+
+        /** The message field, its buttons and what is behind them. */
+        data class Composer(
+            /** `bar` (a strip), `pill` (the send button inside the field) or `floating` (a raised capsule over the thread). */
+            val style: String,
+            /** A microphone while the field is empty: it calls the agent. */
+            val mic: Boolean,
+            /** A paperclip, where the app takes attachments ([GraineChat.onAttach]). */
+            val attach: Boolean,
+            /** The send button: `circle`, `rounded` or `icon` (no fill). */
+            val send: String,
+            /** The field's fill. */
+            val fill: String,
+            val text: String,
+            val placeholder: String,
+            val border: String,
+            /** The strip behind the field; null: none, the thread shows through. */
+            val strip: String?,
+            val shadow: Shadow?,
+            /** The field's height and corners. */
+            val height: Double,
+            val radius: Double,
+            /** Null: no fill. */
+            val sendFill: String?,
+            val sendIcon: String,
+            /** The paperclip and the call button. */
+            val icon: String,
+        )
+
+        data class Typing(
+            /** `loader`, `dots`, `wave` or `text`. */
+            val style: String,
+            /** Empty: "Typing…". */
+            val text: String,
+            val color: String,
+        )
+
+        data class Density(
+            /** `comfortable`, `compact` or `spacious`. */
+            val name: String,
+            /** Between rows. */
+            val gap: Double,
+            /** Between two messages of one group. */
+            val groupGap: Double,
+            /** Inside a bubble. */
+            val padX: Double,
+            val padY: Double,
+            /** The thread's side margins. */
+            val edge: Double,
+        )
+
+        /** How a new conversation opens. */
+        data class Welcome(
+            /** `centered`, `card`, `hero` or `minimal`. */
+            val layout: String,
+            /** The starters as `chips` or as a `list`. */
+            val starters: String,
+        )
+
+        /** The rating asked for once the agent ends the conversation. */
+        data class Rating(
+            val show: Boolean,
+            /** `thumbs`, `stars` or `emoji`. */
+            val style: String,
+            /** Empty: "How was this chat?". */
+            val prompt: String,
+        )
+
+        data class Escalation(
+            /** A button that calls the agent: `none`, `header` or `composer`. */
+            val call: String,
+        )
+
+        /** Frosted pieces: their colour at [opacity], over the wallpaper blurred by [blur] where the platform can. */
+        data class Glass(val blur: Double, val opacity: Double)
+    }
 
     /** The call screen, resolved. */
     data class Call(
@@ -346,7 +575,9 @@ data class GraineThemeTokens(
  * THE TOKENS AS THE PLATFORM SDKS HAND THEM OVER — the contract's token JSON
  * (Android's `ThemeTokens.toJson()`, the iOS facade's `themeJSON`), read
  * leniently: a set without its colours is no design (null); any other value
- * missing or of the wrong type takes a plain default, never a crash.
+ * missing or of the wrong type takes a plain default, never a crash. The chat
+ * window's pieces are read over the classic chat the same set implies
+ * (ChatStyle.kt), so they are whole even from a server that sent none.
  */
 internal object ThemeBridge {
     fun parse(json: String?): GraineThemeTokens? {
@@ -375,6 +606,18 @@ internal object ThemeBridge {
         val elevation = obj(o["elevation"])
         val motion = obj(o["motion"])
         val icons = obj(o["icons"])
+        val shapeTokens = GraineThemeTokens.Shape(
+            radius = GraineThemeTokens.Shape.Radius(dbl(radius["sm"]), dbl(radius["md"]), dbl(radius["lg"]), dbl(radius["xl"])),
+            borderWidth = dbl(shape["borderWidth"]),
+            launcher = str(shape["launcher"], "circle"),
+        )
+        val spacingTokens = GraineThemeTokens.Spacing(dbl(spacing["unit"]), dbl(spacing["cardPadding"]), dbl(spacing["gap"]))
+        val elevationTokens = GraineThemeTokens.Elevation(
+            card = shadow(elevation["card"]),
+            floating = shadow(elevation["floating"]),
+            hardOffset = (elevation["hardOffset"] as? Map<*, *>)?.let { GraineThemeTokens.Offset(dbl(it["x"]), dbl(it["y"])) },
+        )
+        val bubbles = str(o["bubbles"], "filled")
         return GraineThemeTokens(
             v = num(o["v"])?.toInt() ?: 1,
             preset = str(o["preset"]),
@@ -387,17 +630,9 @@ internal object ThemeBridge {
                 letterSpacing = GraineThemeTokens.Font.Pair(dbl(spacingOf["body"]), dbl(spacingOf["title"])),
                 lineHeight = GraineThemeTokens.Font.Pair(dbl(lineOf["body"], 1.0), dbl(lineOf["title"], 1.0)),
             ),
-            shape = GraineThemeTokens.Shape(
-                radius = GraineThemeTokens.Shape.Radius(dbl(radius["sm"]), dbl(radius["md"]), dbl(radius["lg"]), dbl(radius["xl"])),
-                borderWidth = dbl(shape["borderWidth"]),
-                launcher = str(shape["launcher"], "circle"),
-            ),
-            spacing = GraineThemeTokens.Spacing(dbl(spacing["unit"]), dbl(spacing["cardPadding"]), dbl(spacing["gap"])),
-            elevation = GraineThemeTokens.Elevation(
-                card = shadow(elevation["card"]),
-                floating = shadow(elevation["floating"]),
-                hardOffset = (elevation["hardOffset"] as? Map<*, *>)?.let { GraineThemeTokens.Offset(dbl(it["x"]), dbl(it["y"])) },
-            ),
+            shape = shapeTokens,
+            spacing = spacingTokens,
+            elevation = elevationTokens,
             motion = GraineThemeTokens.Motion(int(motion["durationMs"]), str(motion["easing"], "standard"), dbl(motion["bounce"])),
             icons = GraineThemeTokens.Icons(
                 style = str(icons["style"], "outline"),
@@ -409,26 +644,43 @@ internal object ThemeBridge {
                 },
             ),
             glass = (o["glass"] as? Map<*, *>)?.let { GraineThemeTokens.Glass(dbl(it["blur"]), dbl(it["surfaceOpacity"], 1.0)) },
-            bubbles = str(o["bubbles"], "filled"),
+            bubbles = bubbles,
             chrome = str(o["chrome"], "none"),
-            chat = (o["chat"] as? Map<*, *>)?.let { chat(it) },
+            chat = (o["chat"] as? Map<*, *>)?.let {
+                chat(it, ChatStyleBase(colors, shapeTokens.radius, shapeTokens.borderWidth, spacingTokens, elevationTokens.card,
+                    elevationTokens.hardOffset != null, bubbles))
+            },
             call = (o["call"] as? Map<*, *>)?.let { call(it, weights) },
         )
     }
 
-    private fun chat(o: Map<*, *>) = GraineThemeTokens.Chat(
-        title = str(o["title"]), subtitle = str(o["subtitle"]), avatar = str(o["avatar"], "logo"), placeholder = str(o["placeholder"]),
-        showTimestamps = o["showTimestamps"] == true,
-        suggestions = (o["suggestions"] as? List<*>).orEmpty().filterIsInstance<String>(),
-        background = str(o["background"]), pattern = str(o["pattern"], "none"), patternColor = str(o["patternColor"]),
-        headerBackground = str(o["headerBackground"]), headerText = str(o["headerText"]), headerSubtext = str(o["headerSubtext"]),
-        composerBackground = str(o["composerBackground"]), composerText = str(o["composerText"]),
-        composerPlaceholder = str(o["composerPlaceholder"]), composerBorder = str(o["composerBorder"]),
-        size = GraineChatSize.entries.firstOrNull { it.wire == o["size"] },
-        // Absent (an older server): on, as every SDK reads them.
-        showUpcomingCalls = o["showUpcomingCalls"] != false, upcomingTitle = str(o["upcomingTitle"]),
-        showHistory = o["showHistory"] != false, newConversation = o["newConversation"] != false,
-    )
+    private fun chat(o: Map<*, *>, base: ChatStyleBase): GraineThemeTokens.Chat {
+        val v1 = ChatV1Words(
+            background = str(o["background"]), pattern = str(o["pattern"], "none"), patternColor = str(o["patternColor"]),
+            showTimestamps = o["showTimestamps"] == true,
+            headerBackground = str(o["headerBackground"]), headerText = str(o["headerText"]), headerSubtext = str(o["headerSubtext"]),
+            composerBackground = str(o["composerBackground"]), composerText = str(o["composerText"]),
+            composerPlaceholder = str(o["composerPlaceholder"]), composerBorder = str(o["composerBorder"]),
+        )
+        // Chat window v2: the server's pieces, field by field over the classic chat these very tokens imply.
+        val p = ChatStyles.read(o, ChatStyles.classic(v1, base))
+        return GraineThemeTokens.Chat(
+            title = str(o["title"]), subtitle = str(o["subtitle"]), avatar = str(o["avatar"], "logo"), placeholder = str(o["placeholder"]),
+            showTimestamps = v1.showTimestamps,
+            suggestions = (o["suggestions"] as? List<*>).orEmpty().filterIsInstance<String>(),
+            background = v1.background, pattern = v1.pattern, patternColor = v1.patternColor,
+            headerBackground = v1.headerBackground, headerText = v1.headerText, headerSubtext = v1.headerSubtext,
+            composerBackground = v1.composerBackground, composerText = v1.composerText,
+            composerPlaceholder = v1.composerPlaceholder, composerBorder = v1.composerBorder,
+            size = GraineChatSize.entries.firstOrNull { it.wire == o["size"] },
+            // Absent (an older server): on, as every SDK reads them.
+            showUpcomingCalls = o["showUpcomingCalls"] != false, upcomingTitle = str(o["upcomingTitle"]),
+            showHistory = o["showHistory"] != false, newConversation = o["newConversation"] != false,
+            preset = p.preset, header = p.header, bubbles = p.bubbles, timestamps = p.timestamps, wallpaper = p.wallpaper,
+            chips = p.chips, cards = p.cards, composer = p.composer, typing = p.typing, density = p.density,
+            welcome = p.welcome, rating = p.rating, escalation = p.escalation, glass = p.glass,
+        )
+    }
 
     private fun call(o: Map<*, *>, weights: Map<*, *>): GraineThemeTokens.Call {
         val status = obj(o["statusText"])

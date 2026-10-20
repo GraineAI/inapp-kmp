@@ -201,12 +201,17 @@ internal object Bridge {
         )
     }
 
-    /** The chat: its turns, its connection's word, whether the agent is typing, and its upcoming calls (none from an older facade). */
+    /**
+     * The chat: its turns, its connection's word, whether the agent is typing,
+     * its upcoming calls and the chat window v2 state (none of either from an
+     * older facade).
+     */
     data class Chat(
         val turns: List<GraineChatTurn>,
         val status: GraineChatStatus,
         val typing: Boolean,
         val upcoming: List<GraineScheduledCall> = emptyList(),
+        val extras: ChatExtras = ChatExtras(),
     )
 
     fun chat(json: String?): Chat {
@@ -220,8 +225,32 @@ internal object Bridge {
         }
         val turns = (o["turns"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { t -> turn(t) } }
         val upcoming = (o["upcomingCalls"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { c -> scheduledCall(c) } }
-        return Chat(turns, status, o["typing"] == true, upcoming)
+        return Chat(turns, status, o["typing"] == true, upcoming, chatExtras(o))
     }
+
+    /**
+     * The snapshot's `quickReplies` ([{label, text}]), `ended`, `rating`
+     * ({value, scale, style} or null) and `pin` ({title, subtitle, imageUrl,
+     * badge} or null). A reply needs its label (no text: the label), a rating
+     * its numbers, a pin its title.
+     */
+    fun chatExtras(o: Map<*, *>): ChatExtras = ChatExtras(
+        quickReplies = (o["quickReplies"] as? List<*>).orEmpty().mapNotNull { r ->
+            val reply = r as? Map<*, *> ?: return@mapNotNull null
+            val label = str(reply["label"]) ?: return@mapNotNull null
+            GraineQuickReply(label, str(reply["text"]) ?: label)
+        },
+        ended = o["ended"] == true,
+        rating = (o["rating"] as? Map<*, *>)?.let { r ->
+            val value = int(r["value"]) ?: return@let null
+            val scale = int(r["scale"]) ?: return@let null
+            GraineChatRating(value, scale, str(r["style"]) ?: "thumbs")
+        },
+        pinned = (o["pin"] as? Map<*, *>)?.let { p ->
+            val title = str(p["title"]) ?: return@let null
+            GraineChatPin(title, str(p["subtitle"]), str(p["imageUrl"]), str(p["badge"]))
+        },
+    )
 
     fun turn(o: Map<*, *>): GraineChatTurn? {
         val id = when (val v = o["id"]) {

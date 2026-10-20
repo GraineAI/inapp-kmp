@@ -11,8 +11,11 @@ import ai.graine.inapp.GraineCallStatus as NativeCallStatus
 import ai.graine.inapp.GraineCallback
 import ai.graine.inapp.GraineCaption as NativeCaption
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
+import ai.graine.inapp.GraineChatPin as NativeChatPin
+import ai.graine.inapp.GraineChatRating as NativeChatRating
 import ai.graine.inapp.GraineChatSize as NativeChatSize
 import ai.graine.inapp.GraineChatTurn as NativeChatTurn
+import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineField as NativeField
 import ai.graine.inapp.GraineInApp
 import ai.graine.inapp.GraineListener
@@ -72,6 +75,14 @@ internal interface AndroidPort {
     val chatTyping: Boolean
     /** The chat's upcoming calls, soonest first (its card's). */
     val chatUpcomingCalls: List<NativeScheduledCall>
+    /** The replies the agent suggests for its latest turn. */
+    val chatQuickReplies: List<NativeQuickReply>
+    /** The agent ended the conversation. */
+    val chatEnded: Boolean
+    /** The user's rating of the conversation, once given. */
+    val chatRating: NativeChatRating?
+    /** The card the app pinned. */
+    val chatPinned: NativeChatPin?
     fun addChatChangeListener(listener: Runnable)
     /** The user is in the chat, at [size] for this open (null: the app's, then the dashboard's). */
     fun chatOpen(size: NativeChatSize?)
@@ -84,6 +95,11 @@ internal interface AndroidPort {
     fun chatCancelUpcoming(id: String)
     /** A component answered, on the conversation that is live (GraineInApp.answerWidget). */
     fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String)
+    fun chatPin(pin: NativeChatPin?)
+    fun chatRate(style: String, value: Int)
+    fun chatSendQuickReply(reply: NativeQuickReply)
+    /** The paperclip's handler (GraineChat.onAttach); null: no paperclip. */
+    fun chatSetAttach(handler: (() -> Unit)?)
 
     // Native calls (GraineInApp.calls): the app's one call, whichever agent it is with.
     val callState: NativeCallState
@@ -171,6 +187,10 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val chatReconnecting: Boolean get() = g.chat.reconnecting
     override val chatTyping: Boolean get() = g.chat.typing
     override val chatUpcomingCalls: List<NativeScheduledCall> get() = g.chat.upcomingCalls
+    override val chatQuickReplies: List<NativeQuickReply> get() = g.chat.quickReplies
+    override val chatEnded: Boolean get() = g.chat.ended
+    override val chatRating: NativeChatRating? get() = g.chat.rating
+    override val chatPinned: NativeChatPin? get() = g.chat.pinned
     override fun addChatChangeListener(listener: Runnable) = g.chat.addChangeListener(listener)
     override fun chatOpen(size: NativeChatSize?) = g.chat.open(size)
     override fun chatConnect() = g.chat.connect()
@@ -181,6 +201,10 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun chatRefreshUpcoming() = g.chat.refreshUpcomingCalls()
     override fun chatCancelUpcoming(id: String) = g.chat.cancelUpcomingCall(id)
     override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) = g.answerWidget(widgetId, data, summary)
+    override fun chatPin(pin: NativeChatPin?) = g.chat.pin(pin)
+    override fun chatRate(style: String, value: Int) { g.chat.rate(style, value) }
+    override fun chatSendQuickReply(reply: NativeQuickReply) = g.chat.sendQuickReply(reply)
+    override fun chatSetAttach(handler: (() -> Unit)?) { g.chat.onAttach = handler }
 
     override val callState: NativeCallState get() = g.calls.state
     override val call: GraineCall? get() = g.calls.call

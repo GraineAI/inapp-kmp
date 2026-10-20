@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.12.0")
-            implementation("ai.graine:inapp-kmp-compose:0.12.0")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.13.0")
+            implementation("ai.graine:inapp-kmp-compose:0.13.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -75,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.12.0`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.13.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.12.0'`
-  (or `pod 'GraineInApp', '~> 0.12.0'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.12.0"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.13.0'`
+  (or `pod 'GraineInApp', '~> 0.13.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.13.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -107,8 +107,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.12.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.12.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.13.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.13.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -218,6 +218,40 @@ as the SDK's window shows them: `refreshUpcomingCalls()`, `cancelUpcomingCall(id
 A component the agent drew (`GraineEvent.Component`) that you draw yourself is
 answered with `answerWidget(id, data, summary)`.
 
+`GraineChat()` draws the chat style chosen in the dashboard (Chat window →
+Style): Classic, the chat as it has always looked, or Soft, Bold, Glass,
+Minimal, Crisp, Cozy, Calm, Compact or Lively — the header, bubbles, times,
+wallpaper, chips, cards, composer, typing indicator, welcome and rating, each
+tunable. Nothing to change in your app.
+
+**Quick replies, the end of a conversation, and its rating.** The agent can
+suggest replies for its turn — chips in the chat window, a tap sent as the
+user's own message — and end the conversation, after which the window asks
+"How was this chat?" where the design does (thumbs, stars or faces). For a
+chat of your own: `quickReplies` (`GraineQuickReply`: `label`, `text`) and
+`sendQuickReply(reply)`; `ended`; `rating` (`GraineChatRating`: `value`,
+`scale`, `style`) and `rate(style, value)`. `onRated` hears each rating,
+given in the window or through `rate`, on the main thread:
+
+```kotlin
+Graine.chat.onRated = { rating -> analytics.log("chat_rated", rating.value) }
+```
+
+**What the conversation is about, and attachments.** Pin a card the window
+draws under its header or atop the thread, as the design says — never sent to
+the agent (describe the screen with `setScreen`, as always). Each line is one
+line: the title at most 60 characters, the subtitle 80, the badge 24.
+
+```kotlin
+Graine.chat.pin(GraineChatPin(title = "Your plan", subtitle = "Renews on 14 Nov", badge = "Active"))
+Graine.chat.pin(null)                          // take it away; `pinned` has what is pinned
+Graine.chat.onAttach = { openFilePicker() }   // the composer's paperclip, where the design shows one
+```
+
+The paperclip shows only while `onAttach` is set; the SDK sends nothing
+itself — your app picks and uploads the file, then tells the agent about it
+as it would about any screen.
+
 **How big the chat opens.** The dashboard sets it per agent (Embed & Widgets →
 Appearance → Chat window → Window size); the app can choose otherwise, for
 every open or for one:
@@ -279,6 +313,18 @@ t.font.heading                         // "DM Sans", or "system" for the platfor
 `chrome`, and the chat window's (`chat`) and the call screen's (`call`) tokens — for the
 device's light or dark appearance, or the brand's fixed scheme. It changes when the device
 switches.
+
+`chat` carries every piece of the chat window as the dashboard's chat style resolved it:
+`preset`, `header`, `bubbles`, `timestamps`, `wallpaper`, `chips`, `cards`, `composer`,
+`typing`, `density`, `welcome`, `rating`, `escalation` and `glass`. A design from before
+chat styles carries the classic chat its colours imply, so they are always there:
+
+```kotlin
+val chat = Graine.theme.value?.chat ?: return
+chat.bubbles.shape                     // "rounded", "squircle", "tail" or "flat"
+chat.bubbles.user.color                // "#318CE7"; null for no fill
+chat.composer.style                    // "bar", "pill" or "floating"
+```
 
 ## Calls
 
@@ -474,8 +520,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.12.0 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.12.0 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.13.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.13.0 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

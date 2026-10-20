@@ -149,6 +149,29 @@ class BridgeTest {
     }
 
     @Test
+    fun theChatWindowsStateRidesTheSnapshot() {
+        val chat = Bridge.chat(
+            """{"turns":[],"status":"online","typing":false,
+                "quickReplies":[{"label":"Yes","text":"Yes, please"},{"label":"Later","text":""},{"label":"  ","text":"x"},"junk",{"text":"no label"}],
+                "ended":true,"rating":{"value":4,"scale":5,"style":"stars"},
+                "pin":{"title":"Your plan","subtitle":null,"imageUrl":"https://example.com/p.png","badge":"Active"}}"""
+        )
+        assertEquals(
+            ChatExtras(
+                listOf(GraineQuickReply("Yes", "Yes, please"), GraineQuickReply("Later", "Later")),
+                ended = true,
+                rating = GraineChatRating(4, 5, "stars"),
+                pinned = GraineChatPin("Your plan", null, "https://example.com/p.png", "Active"),
+            ),
+            chat.extras,
+            "a reply needs its label (no text: the label)",
+        )
+        assertEquals(ChatExtras(), Bridge.chat("""{"turns":[],"status":"online","typing":false}""").extras, "an older facade says nothing of them")
+        val odd = Bridge.chat("""{"ended":"yes","rating":{"scale":5},"pin":{"subtitle":"No title"},"quickReplies":{}}""").extras
+        assertEquals(ChatExtras(), odd, "a rating needs its numbers, a pin its title; the wrong types are nothing")
+    }
+
+    @Test
     fun theCallIsWhatTheScreenDraws() {
         val info = Bridge.calls(
             """{"state":"ended","endReason":"remote","callId":"c1","callerName":"Asha","direction":"incoming","hosted":true,"muted":true,

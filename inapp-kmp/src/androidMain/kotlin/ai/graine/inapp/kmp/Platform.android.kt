@@ -32,6 +32,12 @@ internal actual val graineMainDispatcher: CoroutineDispatcher = object : Corouti
     override fun dispatch(context: CoroutineContext, block: Runnable) { handler.post(block) }
 }
 
+/** StrictMath: fdlibm's pow, as the Android SDK reckons the chat's colours (and the server's JavaScript engine). */
+internal actual fun platformPow(x: Double, y: Double): Double = StrictMath.pow(x, y)
+
+internal actual fun composed(text: String): String =
+    runCatching { java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFC) }.getOrDefault(text)
+
 internal actual object PlatformPush {
     actual fun onNewToken(token: String) {
         val app = AndroidHost.application ?: return

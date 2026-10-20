@@ -105,6 +105,14 @@ internal class FakeEngine : GraineEngine {
         calls += "answerWidget:$widgetId"
     }
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) { calls += "newConversation"; newConversationAnswer?.let(done) }
+    /** Every pin handed over, as the platform got it. */
+    val pins = mutableListOf<GraineChatPin?>()
+    override fun chatPin(pin: GraineChatPin?) { pins += pin; calls += "chatPin:${pin?.title}" }
+    override fun chatRate(style: String, value: Int) { calls += "chatRate:$style:$value" }
+    override fun chatSendQuickReply(reply: GraineQuickReply) { calls += "sendQuickReply:${reply.label}:${reply.text}" }
+    /** The paperclip's handler as the platform holds it. */
+    var attachHandler: (() -> Unit)? = null
+    override fun chatSetAttachHandler(handler: (() -> Unit)?) { attachHandler = handler; calls += "attach:${handler != null}" }
 
     override fun callsConfigure(config: GraineCallsConfig) { callsConfig = config; calls += "callsConfigure" }
     override fun callsEnableVoIPPushes() { calls += "enableVoIPPushes" }

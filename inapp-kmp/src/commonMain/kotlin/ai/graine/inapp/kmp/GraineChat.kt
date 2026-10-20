@@ -76,6 +76,97 @@ enum class GraineChatSize(
     FULL("full"),
 }
 
+/**
+ * One reply the agent suggests for its latest turn — a chip in the SDK's chat
+ * window: the words on the chip ([label]) and what a tap sends as the user's
+ * own message ([text]).
+ */
+data class GraineQuickReply(val label: String, val text: String)
+
+/**
+ * The user's answer to "How was this chat?", asked once the agent ends the
+ * conversation. [style] is `thumbs`, `stars` or `emoji`: thumbs are [value]
+ * 1 (up) or 0 (down) of [scale] 1, stars and faces 1–5 of 5.
+ */
+data class GraineChatRating(val value: Int, val scale: Int, val style: String)
+
+/**
+ * WHAT THE CONVERSATION IS ABOUT — a card the app pins to the chat window
+ * ([GraineChat.pin]): an item, an account, a request. Drawn as a bar under
+ * the header or as a card atop the thread, as the design says; never sent to
+ * the agent (describe the screen to it with [Graine.setScreen], as always).
+ * Each line is one line: [title] at most 60 characters, [subtitle] 80,
+ * [badge] 24.
+ */
+data class GraineChatPin(
+    val title: String,
+    val subtitle: String? = null,
+    /** A picture for the thumbnail, filled and cropped; none draws the title's first letter. */
+    val imageUrl: String? = null,
+    /** A short word at the trailing end ("Active", "2 items"). */
+    val badge: String? = null,
+)
+
+/**
+ * A PIN AS THE CHAT WINDOW DRAWS IT — the native SDKs' rule, so what
+ * [GraineChat.pin] hands over is what they keep: each line composed, control
+ * and text-direction override characters as spaces, spaces collapsed,
+ * trimmed, and cut to its length in characters (whole characters: a cut never
+ * splits one); no title, no pin.
+ */
+internal object ChatPins {
+    const val TITLE_MAX = 60
+    const val SUBTITLE_MAX = 80
+    const val BADGE_MAX = 24
+
+    fun clean(pin: GraineChatPin?): GraineChatPin? {
+        val title = line(pin?.title, TITLE_MAX)
+        if (pin == null || title.isEmpty()) return null
+        return GraineChatPin(
+            title = title,
+            subtitle = line(pin.subtitle, SUBTITLE_MAX).ifEmpty { null },
+            imageUrl = pin.imageUrl?.trim()?.ifEmpty { null },
+            badge = line(pin.badge, BADGE_MAX).ifEmpty { null },
+        )
+    }
+
+    /** One line of words, at most [max] characters (code points). */
+    fun line(v: String?, max: Int): String {
+        if (v == null) return ""
+        val sb = StringBuilder(v.length)
+        var inSpace = false
+        for (c in composed(v)) {
+            // A control or a direction override is drawn as a space, never as what it does; a run of spaces is one.
+            if (isControl(c) || isJsSpace(c)) {
+                if (!inSpace) sb.append(' ')
+                inSpace = true
+            } else {
+                sb.append(c)
+                inSpace = false
+            }
+        }
+        val s = sb.toString().trim(' ')
+        var end = 0
+        var count = 0
+        while (end < s.length && count < max) {
+            end += if (s[end].isHighSurrogate() && end + 1 < s.length && s[end + 1].isLowSurrogate()) 2 else 1
+            count++
+        }
+        return if (end < s.length) s.substring(0, end).trim(' ') else s
+    }
+
+    private fun isControl(c: Char): Boolean =
+        c <= '\u001F' || c in '\u007F'..'\u009F' || c == '\u2028' || c == '\u2029' || c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'
+
+    /** JavaScript's `\s`: its whitespace and line terminators. */
+    private fun isJsSpace(c: Char): Boolean =
+        c == ' ' || c in '\t'..'\r' || c == '\u00A0' || c == '\u1680' || c in '\u2000'..'\u200A' || c == '\u2028' || c == '\u2029' ||
+            c == '\u202F' || c == '\u205F' || c == '\u3000' || c == '\uFEFF'
+}
+
+/** [text] composed (Unicode NFC), as the platform SDKs compose the words they draw. */
+internal expect fun composed(text: String): String
+
 /** Where the chat's connection is. */
 enum class GraineChatStatus {
     /** Not in the chat: never opened, left, or the app is in the background. */
@@ -110,6 +201,12 @@ enum class GraineChatStatus {
  * and the agent continues from them.
  * [newConversation] starts a fresh thread. An app drawing its own chat lays
  * the turns out with [GraineChatRows].
+ *
+ * The agent may suggest replies for its turn ([quickReplies], sent with
+ * [sendQuickReply]) and end the conversation ([ended]), after which the chat
+ * window asks how it went where the design does ([rating], [onRated],
+ * [rate]). The app can pin what the conversation is about ([pin]) and take
+ * attachments ([onAttach]).
  */
 class GraineChat internal constructor(private val agent: GraineAgent) {
     /** What has been said, oldest first. */
@@ -127,6 +224,73 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
      * one), only where Graine rings this app; empty otherwise.
      */
     val upcomingCalls: StateFlow<List<GraineScheduledCall>> = agent.chatUpcoming.asStateFlow()
+
+    /**
+     * The replies the agent suggests for its latest turn — chips in the SDK's
+     * chat window; read them to draw your own, and send one with
+     * [sendQuickReply]. Empty once the user sends anything, the agent starts
+     * another turn, an earlier conversation is restored, or the conversation
+     * ends. On iOS they need the GraineInApp of this version (an older one
+     * offers none).
+     */
+    val quickReplies: StateFlow<List<GraineQuickReply>> = agent.chatQuickReplies.asStateFlow()
+
+    /**
+     * The agent ended the conversation: the chat window asks for a rating
+     * where the design does. The user sending anything starts over.
+     */
+    val ended: StateFlow<Boolean> = agent.chatEnded.asStateFlow()
+
+    /** The user's answer to "How was this chat?", once given — one per conversation; null before. */
+    val rating: StateFlow<GraineChatRating?> = agent.chatRating.asStateFlow()
+
+    /** The card the app pinned ([pin]), as the chat window has it; null when nothing is pinned. */
+    val pinned: StateFlow<GraineChatPin?> = agent.chatPinned.asStateFlow()
+
+    /**
+     * The user rated the conversation — in the chat window's rating card, or
+     * through [rate]. On the main thread, once for each rating. The answer is
+     * also recorded on the conversation; [rating] keeps it.
+     */
+    var onRated: ((GraineChatRating) -> Unit)?
+        get() = agent.ratedHandler
+        set(value) { agent.ratedHandler = value }
+
+    /**
+     * The app takes attachments: the chat window draws its paperclip (where
+     * the design asks for one) and a tap calls this, on the main thread. The
+     * SDK sends nothing itself — pick and upload the file, then tell the agent
+     * about it as you would about any screen. Null (the default): no
+     * paperclip. May be set before [Graine.configure].
+     */
+    var onAttach: (() -> Unit)?
+        get() = agent.attachHandler
+        set(value) = agent.setAttachHandler(value)
+
+    /**
+     * PIN WHAT THE CONVERSATION IS ABOUT — a card the chat window draws under
+     * its header or atop the thread, as the design says (nothing where the
+     * design hides it). `pin(null)` takes it away. Never sent to the agent.
+     * Each line is cleaned to one line and cut to its length; a pin without a
+     * title is no pin. [pinned] has it once the chat window does. On iOS it
+     * needs the GraineInApp of this version.
+     */
+    fun pin(pin: GraineChatPin?) = agent.engine().chatPin(ChatPins.clean(pin))
+
+    /**
+     * The user's answer to "How was this chat?", for an app drawing its own
+     * rating: [style] `thumbs` ([value] 1 up, 0 down), `stars` or `emoji`
+     * (1–5); another word is thumbs. Taken once per conversation, and only
+     * after the agent ended it ([ended]); recorded on the conversation, then
+     * in [rating] and [onRated]. On iOS it needs the GraineInApp of this version.
+     */
+    fun rate(style: String, value: Int) = agent.engine().chatRate(style, value)
+
+    /** One of [quickReplies], sent as the user's own message — a real turn, exactly as if typed. */
+    fun sendQuickReply(reply: GraineQuickReply) {
+        if (reply.text.isBlank()) return
+        agent.engine().chatSendQuickReply(reply)
+    }
 
     /**
      * The user is in the chat: connect, and stay connected. Ends a call the

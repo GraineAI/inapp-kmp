@@ -16,6 +16,8 @@ import ai.graine.inapp.GraineCallTransport as NativeCallTransport
 import ai.graine.inapp.GraineCallback
 import ai.graine.inapp.GraineCaption as NativeCaption
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
+import ai.graine.inapp.GraineChatPin as NativeChatPin
+import ai.graine.inapp.GraineChatRating as NativeChatRating
 import ai.graine.inapp.GraineChatSize as NativeChatSize
 import ai.graine.inapp.GraineChatTurn as NativeChatTurn
 import ai.graine.inapp.GraineError
@@ -23,6 +25,7 @@ import ai.graine.inapp.GraineErrorCode as NativeErrorCode
 import ai.graine.inapp.GraineField as NativeField
 import ai.graine.inapp.GraineListener
 import ai.graine.inapp.GraineMemory as NativeMemory
+import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
 import ai.graine.inapp.GraineSchedulingRules as NativeRules
 import ai.graine.inapp.GraineScreen as NativeScreen
@@ -64,6 +67,8 @@ class AndroidEngineTest {
         override fun sessionFailed(message: String) { failures += message }
         override fun event(event: GraineEvent) { events += event }
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) { chat = Triple(turns, status, typing) }
+        var extras: ChatExtras? = null
+        override fun chatExtras(extras: ChatExtras) { this.extras = extras }
         var upcoming: List<GraineScheduledCall>? = null
         override fun upcomingCalls(calls: List<GraineScheduledCall>) { upcoming = calls }
         override fun calls(info: GraineCallInfo) { calls = info }
@@ -133,6 +138,10 @@ class AndroidEngineTest {
         override var chatReconnecting = false
         override var chatTyping = false
         override var chatUpcomingCalls: List<NativeScheduledCall> = emptyList()
+        override var chatQuickReplies: List<NativeQuickReply> = emptyList()
+        override var chatEnded = false
+        override var chatRating: NativeChatRating? = null
+        override var chatPinned: NativeChatPin? = null
         override fun addChatChangeListener(listener: Runnable) { chatListeners += listener }
         override fun chatOpen(size: NativeChatSize?) { did += "chatOpen:$size" }
         override fun chatConnect() { did += "chatConnect" }
@@ -144,6 +153,13 @@ class AndroidEngineTest {
         override fun chatCancelUpcoming(id: String) { did += "cancelUpcoming:$id" }
         val answered = mutableListOf<Triple<String, Map<String, Any?>, String>>()
         override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) { answered += Triple(widgetId, data, summary) }
+        val pinsGiven = mutableListOf<NativeChatPin?>()
+        override fun chatPin(pin: NativeChatPin?) { pinsGiven += pin; did += "chatPin:${pin?.title}" }
+        override fun chatRate(style: String, value: Int) { did += "chatRate:$style:$value" }
+        val repliesSent = mutableListOf<NativeQuickReply>()
+        override fun chatSendQuickReply(reply: NativeQuickReply) { repliesSent += reply; did += "sendQuickReply:${reply.text}" }
+        var attach: (() -> Unit)? = null
+        override fun chatSetAttach(handler: (() -> Unit)?) { attach = handler; did += "attach:${handler != null}" }
         fun chatChanged() = chatListeners.forEach { it.run() }
 
         override var callState = NativeCallState.IDLE
@@ -574,6 +590,86 @@ class AndroidEngineTest {
         assertEquals(listOf(GraineChatChannel.VOICE, GraineChatChannel.CHAT, GraineChatChannel.CHAT), turns.map { it.channel })
         assertEquals(listOf(null, GraineDelivery.SENT, GraineDelivery.SENDING), turns.map { it.delivery })
         assertEquals(Instant.fromEpochMilliseconds(1_760_353_200_000), turns[0].at)
+    }
+
+    // ── chat window v2 ────────────────────────────────────────────────────
+
+    @Test
+    fun theChatWindowsStateIsTheSdksInTheSharedTypes() {
+        start()
+        assertEquals("reported with the chat from the start", ChatExtras(), heard.extras)
+        port.chatQuickReplies = listOf(NativeQuickReply("Yes", "Yes, please"), NativeQuickReply("Later", "Later"))
+        port.chatChanged()
+        assertEquals(listOf(GraineQuickReply("Yes", "Yes, please"), GraineQuickReply("Later", "Later")), heard.extras!!.quickReplies)
+        // The agent ended the conversation and the user rated it; the app had pinned a card.
+        port.chatQuickReplies = emptyList()
+        port.chatEnded = true
+        port.chatRating = NativeChatRating(4, 5, "stars")
+        port.chatPinned = NativeChatPin("Your plan", "Renews on 14 Nov", "https://example.com/p.png", "Active")
+        port.listeners.single().onChatState(false, false)
+        assertEquals(
+            ChatExtras(emptyList(), true, GraineChatRating(4, 5, "stars"), GraineChatPin("Your plan", "Renews on 14 Nov", "https://example.com/p.png", "Active")),
+            heard.extras,
+        )
+    }
+
+    @Test
+    fun theChatWindowsControlsAreTheSdksMembers() {
+        start()
+        engine.chatPin(GraineChatPin("Your plan", badge = "Active"))
+        engine.chatPin(null)
+        engine.chatRate("emoji", 5)
+        engine.chatSendQuickReply(GraineQuickReply("A person", "I'd like to talk to a person"))
+        var taps = 0
+        engine.chatSetAttachHandler { taps++ }
+        port.attach!!()
+        engine.chatSetAttachHandler(null)
+        assertEquals(listOf(NativeChatPin("Your plan", null, null, "Active"), null), port.pinsGiven)
+        assertEquals("the Android SDK's sendQuickReply, with the reply as its type", listOf(NativeQuickReply("A person", "I'd like to talk to a person")), port.repliesSent)
+        assertEquals("a tap on the Android SDK's paperclip is the app's handler", 1, taps)
+        assertNull("no handler, no paperclip", port.attach)
+        assertEquals(
+            listOf("chatPin:Your plan", "chatPin:null", "chatRate:emoji:5", "sendQuickReply:I'd like to talk to a person", "attach:true", "attach:false"),
+            port.did,
+        )
+        // Field for field, both ways.
+        val pin = GraineChatPin("Your plan", "Renews on 14 Nov", "https://example.com/p.png", "Active")
+        assertEquals(pin, AndroidMapping.pin(AndroidMapping.pin(pin)))
+        assertEquals(GraineQuickReply("Yes", "Yes, please"), AndroidMapping.quickReply(AndroidMapping.quickReply(GraineQuickReply("Yes", "Yes, please"))))
+        assertEquals(GraineChatRating(0, 1, "thumbs"), AndroidMapping.rating(NativeChatRating(0, 1, "thumbs")))
+    }
+
+    @Test
+    fun throughTheSharedApiARatingTheAndroidSdkTakesIsHeardOnceAndTheAttachHandlerIsTheApps() {
+        Graine.reset()
+        try {
+            // The shared API over this engine and its port, as configure() puts it together.
+            Graine.install(engine)
+            val ratings = mutableListOf<GraineChatRating>()
+            Graine.chat.onRated = { ratings += it }
+            var taps = 0
+            Graine.chat.onAttach = { taps++ }
+            port.attach!!()
+            assertEquals(1, taps)
+            Graine.chat.pin(GraineChatPin("  Your plan\n", badge = "  Active "))
+            assertEquals("cleaned before the Android SDK has it", NativeChatPin("Your plan", null, null, "Active"), port.pinsGiven.last())
+            Graine.chat.rate("thumbs", 1)
+            assertEquals("chatRate:thumbs:1", port.did.last())
+            // The Android SDK took the rating: its chat changed, and says so more than once.
+            port.chatEnded = true
+            port.chatRating = NativeChatRating(1, 1, "thumbs")
+            port.chatPinned = NativeChatPin("Your plan", null, null, "Active")
+            port.chatChanged()
+            port.chatChanged()
+            assertEquals(listOf(GraineChatRating(1, 1, "thumbs")), ratings)
+            assertEquals(GraineChatRating(1, 1, "thumbs"), Graine.chat.rating.value)
+            assertTrue(Graine.chat.ended.value)
+            assertEquals(GraineChatPin("Your plan", null, null, "Active"), Graine.chat.pinned.value)
+            Graine.chat.sendQuickReply(GraineQuickReply("Yes", "Yes, please"))
+            assertEquals(NativeQuickReply("Yes", "Yes, please"), port.repliesSent.last())
+        } finally {
+            Graine.reset()
+        }
     }
 
     @Test

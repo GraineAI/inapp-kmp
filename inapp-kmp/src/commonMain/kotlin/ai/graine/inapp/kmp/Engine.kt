@@ -69,6 +69,14 @@ internal interface GraineEngine {
     fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String)
     /** A fresh thread: answers once it is done, or with Graine's refusal (the chat then as it was). */
     fun chatNewConversation(done: (Result<Unit>) -> Unit)
+    /** Pin [pin] (already cleaned: [ChatPins]) to the chat window; null takes it away. */
+    fun chatPin(pin: GraineChatPin?)
+    /** The user's rating of a conversation the agent ended, from the app's own UI: the platform SDK's rule decides. */
+    fun chatRate(style: String, value: Int)
+    /** One of the agent's quick replies, sent as the user's own message. */
+    fun chatSendQuickReply(reply: GraineQuickReply)
+    /** The app's attachment handler (main thread), or null: the chat window draws its paperclip only with one. */
+    fun chatSetAttachHandler(handler: (() -> Unit)?)
 
     fun callsConfigure(config: GraineCallsConfig)
     fun callsEnableVoIPPushes()
@@ -107,6 +115,8 @@ internal interface EngineSink {
     fun sessionFailed(message: String)
     fun event(event: GraineEvent)
     fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean)
+    /** The chat window v2 state beside the turns. A platform SDK that has none never reports it: the defaults stand. */
+    fun chatExtras(extras: ChatExtras) {}
     /** The chat's upcoming calls (its card's), soonest first. */
     fun upcomingCalls(calls: List<GraineScheduledCall>)
     fun calls(info: GraineCallInfo)
@@ -116,6 +126,18 @@ internal interface EngineSink {
     /** The brand's design tokens for the device's appearance now; null before the session and without a design. */
     fun theme(tokens: GraineThemeTokens?)
 }
+
+/**
+ * The chat's state beside its turns (chat window v2): the replies the agent
+ * suggests for its latest turn, whether it ended the conversation, the user's
+ * rating of it, and the card the app pinned — as the platform SDK holds them.
+ */
+internal data class ChatExtras(
+    val quickReplies: List<GraineQuickReply> = emptyList(),
+    val ended: Boolean = false,
+    val rating: GraineChatRating? = null,
+    val pinned: GraineChatPin? = null,
+)
 
 /** The platform's engine for the agent [name], over its native SDK. */
 internal expect fun createPlatformEngine(config: GraineConfig, name: String): GraineEngine

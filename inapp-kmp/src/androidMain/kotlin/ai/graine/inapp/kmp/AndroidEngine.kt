@@ -150,9 +150,16 @@ internal class AndroidEngine(
         if (error != null) done(Result.failure(AndroidMapping.error(error))) else done(Result.success(Unit))
     }
 
+    // Chat window v2: the Android SDK's own members, which keep their rules (one rating, after the end; the pin's lines).
+    override fun chatPin(pin: GraineChatPin?) = onMain { port.chatPin(pin?.let { AndroidMapping.pin(it) }) }
+    override fun chatRate(style: String, value: Int) = onMain { port.chatRate(style, value) }
+    override fun chatSendQuickReply(reply: GraineQuickReply) = port.chatSendQuickReply(AndroidMapping.quickReply(reply))
+    override fun chatSetAttachHandler(handler: (() -> Unit)?) = onMain { port.chatSetAttach(handler) }
+
     private fun publishChat() {
         val status = ChatInference.status(port.chatConnected, port.chatConnecting, port.chatFailed, port.chatReconnecting)
         sink.chat(port.chatTurns.map { AndroidMapping.turn(it) }, status, port.chatTyping)
+        sink.chatExtras(AndroidMapping.extras(port.chatQuickReplies, port.chatEnded, port.chatRating, port.chatPinned))
         sink.upcomingCalls(port.chatUpcomingCalls.map { AndroidMapping.scheduledCall(it) })
     }
 
