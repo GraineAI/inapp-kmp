@@ -57,6 +57,7 @@ class GraineAgent internal constructor(
     internal val eventFlow = MutableSharedFlow<GraineEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     internal val chatTurns = MutableStateFlow<List<GraineChatTurn>>(emptyList())
     internal val chatStatus = MutableStateFlow(GraineChatStatus.IDLE)
+    internal val chatFailed = MutableStateFlow(false)
     internal val chatTyping = MutableStateFlow(false)
     internal val chatUpcoming = MutableStateFlow<List<GraineScheduledCall>>(emptyList())
     internal val chatQuickReplies = MutableStateFlow<List<GraineQuickReply>>(emptyList())
@@ -254,10 +255,12 @@ class GraineAgent internal constructor(
      * The times the SDK's booking sheet would offer on [day], in the phone's
      * time zone — every 5 minutes from the soonest the agent's rules allow
      * ([GraineSchedulingRules.earliest], rounded up) to the latest, oldest
-     * first — for a picker of your own; book one with [scheduleCall]. Empty
-     * for a day outside the rules, and before configure(). Graine still checks
-     * what only it knows (the calling hours, the calls already booked) when
-     * the time is booked. On iOS it needs the GraineInApp of this version.
+     * first — and, when the agent has a calling window
+     * ([GraineSchedulingRules.callingWindow]), only the times inside it, on the
+     * phone's clock — for a picker of your own; book one with [scheduleCall].
+     * Empty for a day outside the rules, and before configure(). Graine checks
+     * the time again when it is booked, with what only it knows (the calls
+     * already booked). On iOS it needs the GraineInApp of this version.
      */
     fun bookingSlots(day: LocalDate): List<Instant> = current?.bookingSlots(day.toString()) ?: emptyList()
 
@@ -375,6 +378,7 @@ class GraineAgent internal constructor(
             chatRating.value = extras.rating
             chatPinned.value = extras.pinned
             chatNewConversationBefore.value = extras.newConversationBefore
+            chatFailed.value = extras.failed
             if (chatSessionId.value != extras.sessionId) {
                 chatSessionId.value = extras.sessionId
                 chatSessions.value = ChatSessions.of(chatTurns.value, extras.sessionId)
@@ -410,6 +414,7 @@ class GraineAgent internal constructor(
         sessionFailure.value = null
         chatTurns.value = emptyList()
         chatStatus.value = GraineChatStatus.IDLE
+        chatFailed.value = false
         chatTyping.value = false
         chatUpcoming.value = emptyList()
         chatQuickReplies.value = emptyList()

@@ -76,6 +76,26 @@ class PublicStateTest {
         assertEquals(GraineChatStatus.DISCONNECTED, Bridge.chat("""{"turns":[],"status":"disconnected","ended":true}""").status)
     }
 
+    @Test
+    fun aChatThatGaveUpIsFailedBesideItsWordAndATryAgainClearsIt() {
+        // The iOS facade says a chat that gave up as `offline`: failed, never for one the agent ended or Graine closed.
+        assertTrue(Bridge.chat("""{"turns":[],"status":"offline","ended":false}""").extras.failed)
+        assertFalse(Bridge.chat("""{"turns":[],"status":"offline","ended":true}""").extras.failed)
+        assertFalse(Bridge.chat("""{"turns":[],"status":"disconnected"}""").extras.failed)
+        assertFalse(Bridge.chat("""{"turns":[],"status":"reconnecting","attempt":3}""").extras.failed)
+        // Through the shared API: the flag beside the word, which stays OFFLINE as before.
+        configured()
+        assertFalse(Graine.chat.failed.value)
+        engine.sink.chat(emptyList(), GraineChatStatus.OFFLINE, false)
+        engine.sink.chatExtras(ChatExtras(failed = true))
+        assertTrue(Graine.chat.failed.value)
+        assertEquals(GraineChatStatus.OFFLINE, Graine.chat.status.value)
+        Graine.chat.retry()
+        engine.sink.chat(emptyList(), GraineChatStatus.CONNECTING, false)
+        engine.sink.chatExtras(ChatExtras(failed = false))
+        assertFalse(Graine.chat.failed.value, "tried again")
+    }
+
     /** Who a chat belongs to, through the iOS facade: the snapshot after an identity change, and what the shared state makes of it. */
     @Test
     fun aChatConnectingAgainForANewIdentityReadsAsConnectingWithTheUnsentLineKept() {
@@ -252,6 +272,25 @@ class PublicStateTest {
         assertNull(old.connection, "an older facade: nothing known")
         assertNull(old.startedAt)
         assertEquals(0f, old.agentLevel)
+        assertTrue(old.captions.isEmpty())
+    }
+
+    @Test
+    fun theCallsTranscriptCrossesTheBridgeAsTheIosSdkKeepsIt() {
+        val said = Bridge.calls(
+            """{"state":"active","callId":"c1","caption":{"role":"agent","text":"It costs","live":true},
+               "transcript":[{"role":"user","text":"What does it cost?","live":false},{"role":"agent","text":"It costs","live":true},{"text":7},"x"]}""",
+        )
+        assertEquals(
+            listOf(GraineCaption(GraineRole.USER, "What does it cost?", false), GraineCaption(GraineRole.AGENT, "It costs", true)),
+            said.captions, "the iOS SDK's transcript; a line without words is skipped",
+        )
+        assertEquals(said.captions.last(), said.caption)
+        assertEquals(1, Bridge.calls("""{"state":"ended","callId":"c1","transcript":[{"role":"agent","text":"Bye","live":false}]}""").captions.size,
+            "kept through the end")
+        assertTrue(Bridge.calls("""{"state":"idle","transcript":[{"role":"agent","text":"Bye","live":false}]}""").captions.isEmpty(), "no call, no transcript")
+        assertEquals(listOf("Hi"), Bridge.calls("""{"state":"active","captions":[{"role":"agent","text":"Hi"}],"transcript":[]}""").captions.map { it.text },
+            "`captions` read first")
     }
 
     @Test

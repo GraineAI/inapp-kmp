@@ -22,6 +22,7 @@ internal fun sessionOf(
     minLeadMinutes: Int?,
     maxPendingPerUser: Int?,
     declaredActions: Set<String>,
+    callingWindow: GraineCallingWindow? = null,
 ): GraineSession {
     val defaults = GraineSchedulingRules()
     return GraineSession(
@@ -38,9 +39,40 @@ internal fun sessionOf(
             callName = callName?.trim()?.takeIf { it.isNotEmpty() },
             hostedRinging = hosted ?: false,
             platforms = platforms.mapNotNull { p -> GrainePlatform.entries.firstOrNull { it.wire == p.trim().lowercase() } }.distinct(),
+            callingWindow = callingWindow,
         ),
         declaredActions = declaredActions,
     )
+}
+
+private val HHMM = Regex("([01]\\d|2[0-3]):([0-5]\\d)")
+
+/**
+ * The calling window a platform SDK reported (`{start, end, days}`), or null —
+ * no window — when there is none or it cannot be read: times "HH:MM" with
+ * start before end; days a list whose whole numbers 0–6 are kept (each once,
+ * in order), every day when it is missing, and no window when none is left.
+ * The rule every Graine SDK reads the session's window with.
+ */
+internal fun callingWindowOf(raw: Any?): GraineCallingWindow? {
+    val o = raw as? Map<*, *> ?: return null
+    fun clock(v: Any?): String? = (v as? String)?.trim()?.takeIf { HHMM.matches(it) }
+    val start = clock(o["start"]) ?: return null
+    val end = clock(o["end"]) ?: return null
+    if (start >= end) return null
+    val days = when (val d = o["days"]) {
+        null -> (0..6).toList()
+        is List<*> -> d.mapNotNull { v ->
+            when (v) {
+                is Long -> v.takeIf { it in 0L..6L }?.toInt()
+                is Int -> v.takeIf { it in 0..6 }
+                is Double -> v.takeIf { it.isFinite() && it % 1.0 == 0.0 && it in 0.0..6.0 }?.toInt()
+                else -> null
+            }
+        }.distinct().sorted()
+        else -> return null
+    }
+    return if (days.isEmpty()) null else GraineCallingWindow(start, end, days)
 }
 
 /**
@@ -246,6 +278,7 @@ internal object Bridge {
             minLeadMinutes = int(calls?.get("minLeadMinutes")),
             maxPendingPerUser = int(calls?.get("maxPendingPerUser")),
             declaredActions = (o["declaredActions"] as? List<*>).orEmpty().filterIsInstance<String>().toSet(),
+            callingWindow = callingWindowOf(calls?.get("callingWindow")),
         )
     }
 
@@ -275,7 +308,9 @@ internal object Bridge {
         }
         val turns = (o["turns"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { t -> turn(t) } }
         val upcoming = (o["upcomingCalls"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { c -> scheduledCall(c) } }
-        return Chat(turns, status, o["typing"] == true, upcoming, chatExtras(o))
+        // The iOS SDK says a chat that gave up as `offline` — its chat window's "Not connected" with a tap to try again —
+        // never for one the agent ended (idle above) or Graine closed (`disconnected`).
+        return Chat(turns, status, o["typing"] == true, upcoming, chatExtras(o).copy(failed = status == GraineChatStatus.OFFLINE))
     }
 
     /**
@@ -347,10 +382,7 @@ internal object Bridge {
             "ended" -> GraineCallState.ENDED
             else -> GraineCallState.IDLE
         }
-        val caption = (o["caption"] as? Map<*, *>)?.let { c ->
-            val text = c["text"] as? String ?: return@let null
-            GraineCaption(if (c["role"] == "agent") GraineRole.AGENT else GraineRole.USER, text, c["live"] == true)
-        }
+        val caption = (o["caption"] as? Map<*, *>)?.let { c -> captionLine(c) }
         val missed = (o["missedCall"] as? Map<*, *>)?.let { m ->
             val id = str(m["callId"]) ?: return@let null
             GraineMissedCall(id, str(m["callerName"]), str(m["reason"]), m["hosted"] == true, instant(m["at"]) ?: Instant.fromEpochMilliseconds(0))
@@ -377,8 +409,19 @@ internal object Bridge {
             agentLevel = level(o["agentLevel"]),
             startedAt = instant(o["connectedAt"]),
             connection = (o["connection"] as? Map<*, *>)?.let { connection(it) },
+            // The iOS SDK's word for it is `transcript` (GraineCalls.transcript); `captions` read first.
+            captions = captionLines(o["captions"] ?: o["transcript"]).takeIf { state != GraineCallState.IDLE }.orEmpty(),
         )
     }
+
+    /** A line of a transcript, `{role, text, live}`: the agent's, else the user's; null without words. */
+    private fun captionLine(line: Map<*, *>): GraineCaption? {
+        val text = line["text"] as? String ?: return null
+        return GraineCaption(if (line["role"] == "agent") GraineRole.AGENT else GraineRole.USER, text, line["live"] == true)
+    }
+
+    /** A transcript, oldest first; anything that is not a line is skipped. */
+    private fun captionLines(v: Any?): List<GraineCaption> = (v as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { l -> captionLine(l) } }
 
     fun outcome(json: String?): GraineCallOutcome? {
         val o = Json.obj(json) ?: return null
@@ -440,11 +483,7 @@ internal object Bridge {
 
     fun voice(json: String?): GraineVoiceInfo {
         val o = Json.obj(json) ?: return GraineVoiceInfo()
-        val captions = (o["captions"] as? List<*>).orEmpty().mapNotNull { c ->
-            val line = c as? Map<*, *> ?: return@mapNotNull null
-            val text = line["text"] as? String ?: return@mapNotNull null
-            GraineCaption(if (line["role"] == "agent") GraineRole.AGENT else GraineRole.USER, text, line["live"] == true)
-        }
+        val captions = captionLines(o["captions"])
         val connected = o["connected"] == true
         val connecting = o["connecting"] == true
         val muted = o["muted"] == true

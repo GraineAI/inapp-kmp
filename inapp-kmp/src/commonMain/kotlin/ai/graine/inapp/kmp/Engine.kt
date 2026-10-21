@@ -152,6 +152,8 @@ internal data class ChatExtras(
     val newConversationBefore: List<String> = emptyList(),
     /** The chat's current session's id; null until Graine names it, and from a platform SDK that predates it. */
     val sessionId: String? = null,
+    /** The chat gave up: every retry spent, nothing connecting it until the user acts. */
+    val failed: Boolean = false,
 )
 
 /** The platform's engine for the agent [name], over its native SDK. */

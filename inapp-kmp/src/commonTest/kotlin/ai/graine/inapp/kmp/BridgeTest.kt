@@ -83,6 +83,12 @@ class BridgeTest {
         )
         assertEquals(setOf("open_screen", "mark_done"), s.declaredActions)
 
+        val windowed = Bridge.session(
+            """{"agentId":"agent-1","calls":{"usersCanBook":true,"callingWindow":{"start":"09:00","end":"21:00","days":[0,1,2,3,4]}}}"""
+        )!!
+        assertEquals(GraineCallingWindow("09:00", "21:00", listOf(0, 1, 2, 3, 4)), windowed.schedulingRules.callingWindow)
+        assertNull(s.schedulingRules.callingWindow, "no window from the facade: none")
+
         val bare = Bridge.session("""{"agentId":"agent-2"}""")!!
         assertNull(bare.memoryEnabled)
         assertEquals("user_id", bare.identityField)

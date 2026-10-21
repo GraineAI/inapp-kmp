@@ -194,10 +194,11 @@ object Graine {
 
     /**
      * The times the SDK's booking sheet would offer on [day] in the phone's
-     * time zone — every 5 minutes within the default agent's booking rules —
-     * for a time picker of your own; book one with [scheduleCall]. Empty for a
-     * day outside the rules and before configure(). Graine checks the agent's
-     * calling hours when the time is booked. See [GraineAgent.bookingSlots].
+     * time zone — every 5 minutes within the default agent's booking rules,
+     * and only inside its calling window when it has one
+     * ([GraineSchedulingRules.callingWindow], from 0.14.1) — for a time picker
+     * of your own; book one with [scheduleCall]. Empty for a day outside the
+     * rules and before configure(). See [GraineAgent.bookingSlots].
      * New in 0.14.0.
      */
     fun bookingSlots(day: LocalDate): List<Instant> = defaultAgent.bookingSlots(day)

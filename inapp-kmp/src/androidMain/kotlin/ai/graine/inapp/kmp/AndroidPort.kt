@@ -136,6 +136,8 @@ internal interface AndroidPort {
     val callConnectedAt: Long
     /** How the call in progress connected so far (GraineCalls.connection). */
     val callConnection: NativeCallConnection?
+    /** What has been said on the call, oldest first (GraineCalls.captions). */
+    val callCaptions: List<NativeCaption>
     fun addCallListener(listener: GraineCallListener)
     fun configureCalls(config: NativeCallsConfig)
     /** A call with this port's agent. */
@@ -173,6 +175,9 @@ internal interface AndroidPort {
     /** What the call runs on, as its wire word — "rtc" or "ws" (GraineVoice.transport); null before any call. */
     val voiceTransport: String?
     val voiceTransportFallbackReason: String?
+    /** The voice bar's levels, 0–1 (GraineVoice.agentLevel, GraineVoice.micLevel). */
+    val voiceAgentLevel: Float
+    val voiceMicLevel: Float
     fun attachVoice(activity: Activity)
     fun startVoice()
     fun endVoice()
@@ -257,6 +262,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val callAgentLevel: Float get() = g.calls.agentLevel
     override val callConnectedAt: Long get() = g.calls.connectedAt
     override val callConnection: NativeCallConnection? get() = g.calls.connection
+    override val callCaptions: List<NativeCaption> get() = g.calls.captions
     override fun addCallListener(listener: GraineCallListener) = g.calls.addListener(listener)
     override fun configureCalls(config: NativeCallsConfig) = g.calls.configure(config)
     override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? =
@@ -285,6 +291,8 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val voiceCallFailed: Boolean get() = g.voice.callFailed
     override val voiceTransport: String? get() = g.voice.transport?.wire
     override val voiceTransportFallbackReason: String? get() = g.voice.transportFallbackReason
+    override val voiceAgentLevel: Float get() = g.voice.agentLevel
+    override val voiceMicLevel: Float get() = g.voice.micLevel
     override fun attachVoice(activity: Activity) = g.voice.attach(activity)
     override fun startVoice() = g.voice.start()
     override fun endVoice() = g.voice.end()

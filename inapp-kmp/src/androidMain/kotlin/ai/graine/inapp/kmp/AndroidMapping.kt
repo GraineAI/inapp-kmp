@@ -9,6 +9,7 @@ import ai.graine.inapp.GraineCallSetupProblem as NativeCallSetupProblem
 import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallTransport as NativeCallTransport
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
+import ai.graine.inapp.GraineCallingWindow as NativeCallingWindow
 import ai.graine.inapp.GraineCallsConfig as NativeCallsConfig
 import ai.graine.inapp.GraineChatPin as NativeChatPin
 import ai.graine.inapp.GraineChatRating as NativeChatRating
@@ -122,8 +123,12 @@ internal object AndroidMapping {
             minLeadMinutes = r.minLeadMinutes,
             maxPendingPerUser = r.maxPendingPerUser,
             declaredActions = s.declaredActions,
+            callingWindow = callingWindow(r.callingWindow),
         )
     }
+
+    /** The Android SDK's calling window, one for one: it has already read the session's with the shared rule. */
+    fun callingWindow(w: NativeCallingWindow?): GraineCallingWindow? = w?.let { GraineCallingWindow(it.start, it.end, it.days) }
 
     /**
      * A chat turn, one for one: the user's carry where they are, the agent's

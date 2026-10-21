@@ -189,6 +189,7 @@ class AndroidEngineTest {
         override var callAgentLevel = 0f
         override var callConnectedAt = 0L
         override var callConnection: NativeCallConnection? = null
+        override var callCaptions: List<NativeCaption> = emptyList()
         override fun addCallListener(listener: GraineCallListener) { callListeners += listener }
         override fun configureCalls(config: NativeCallsConfig) { callsConfig = config }
         override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? {
@@ -236,6 +237,8 @@ class AndroidEngineTest {
         override var voiceCallFailed = false
         override var voiceTransport: String? = null
         override var voiceTransportFallbackReason: String? = null
+        override var voiceAgentLevel = 0f
+        override var voiceMicLevel = 0f
         override fun setVoiceCaptionsOn(on: Boolean) { captionsOnNow = on; did += "captionsOn:$on" }
         override fun clearVoiceCaptions() { voiceCaptions = emptyList(); did += "clearCaptions" }
     }
@@ -288,6 +291,13 @@ class AndroidEngineTest {
         assertEquals(true, s.memoryEnabled)
         assertEquals(GraineSchedulingRules(true, 10, 7, 2, 45, "Asha · Graine Care", true, listOf(GrainePlatform.ANDROID)), s.schedulingRules)
         assertEquals(setOf("open_screen", "mark_done"), s.declaredActions)
+    }
+
+    @Test
+    fun theAgentsCallingWindowCrossesWithTheSession() {
+        port.session = session(rules = NativeRules(usersCanBook = true, callingWindow = ai.graine.inapp.GraineCallingWindow("09:00", "21:00", listOf(0, 1, 2, 3, 4))))
+        start()
+        assertEquals(GraineCallingWindow("09:00", "21:00", listOf(0, 1, 2, 3, 4)), heard.sessions.single().schedulingRules.callingWindow)
     }
 
     @Test
@@ -493,6 +503,22 @@ class AndroidEngineTest {
         assertEquals(GraineChatStatus.RECONNECTING, heard.chat!!.second)
         port.chatConnecting = false; port.chatReconnecting = false; port.chatFailed = true; port.chatChanged()
         assertEquals(GraineChatStatus.OFFLINE, heard.chat!!.second)
+    }
+
+    @Test
+    fun aChatThatGaveUpIsFailedUntilATapConnectsItAgain() {
+        start()
+        port.chatConnecting = true; port.chatChanged()
+        assertFalse(heard.extras!!.failed)
+        port.chatConnecting = false; port.chatFailed = true; port.chatChanged()
+        assertEquals("the status, as before", GraineChatStatus.OFFLINE, heard.chat!!.second)
+        assertTrue("every retry spent", heard.extras!!.failed)
+        engine.chatRetry()
+        assertEquals(listOf("chatConnect"), port.did)
+        port.chatFailed = false; port.chatConnecting = true; port.chatChanged()
+        assertFalse("tried again: no longer failed", heard.extras!!.failed)
+        port.chatConnecting = false; port.chatEnded = true; port.chatChanged()
+        assertFalse("the agent ending the conversation is not the chat failing", heard.extras!!.failed)
     }
 
     @Test
@@ -743,8 +769,12 @@ class AndroidEngineTest {
         assertEquals(GraineCallState.ACTIVE, heard.calls!!.state)
         assertTrue(heard.calls!!.incoming && heard.calls!!.hosted)
         l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ANSWERED, callId = "c1", hosted = true))
+        port.callCaptions = listOf(NativeCaption(Role.CUSTOMER, "Hello?", false), NativeCaption(Role.AGENT, "Your payment is due", false))
         l.onCallCaption(Role.AGENT, "Your payment is due", false)
         assertEquals(GraineCaption(GraineRole.AGENT, "Your payment is due", false), heard.calls!!.caption)
+        assertEquals("the call's transcript, as the SDK keeps it",
+            listOf(GraineCaption(GraineRole.USER, "Hello?", false), GraineCaption(GraineRole.AGENT, "Your payment is due", false)),
+            heard.calls!!.captions)
         // The Android SDK measures the call; its length is passed on as it says.
         l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ENDED, NativeOutcome.EndReason.REMOTE, callId = "c1", durationSeconds = 63, hosted = true))
         assertEquals(
@@ -755,9 +785,13 @@ class AndroidEngineTest {
             ),
             heard.outcomes,
         )
+        port.callState = NativeCallState.ENDED
+        l.onCallState(NativeCallState.ENDED, c)
+        assertEquals("kept through the end", 2, heard.calls!!.captions.size)
         port.callState = NativeCallState.IDLE; port.call = null
         l.onCallState(NativeCallState.IDLE, null)
         assertNull(heard.calls!!.caption)
+        assertTrue("no call: no transcript", heard.calls!!.captions.isEmpty())
         assertFalse(heard.calls!!.showsCallScreen)
     }
 
@@ -926,6 +960,20 @@ class AndroidEngineTest {
         port.listeners.single().onCallState(true, false)
         assertTrue(heard.voice!!.connected)
         assertEquals(listOf("startVoice", "attachVoice", "startVoice", "voiceMuted:true"), port.did)
+    }
+
+    @Test
+    fun theVoiceBarsLevelsAreTheSdksWhileItsCallIsLive() {
+        start()
+        port.voiceAgentLevel = 0.4f; port.voiceMicLevel = 0.2f
+        port.listeners.single().onLevels(0.4f, 0.2f)
+        assertEquals("no call, no levels", 0f to 0f, heard.voice!!.agentLevel to heard.voice!!.micLevel)
+        port.voiceConnected = true
+        port.listeners.single().onLevels(0.4f, 0.2f)
+        assertEquals(0.4f to 0.2f, heard.voice!!.agentLevel to heard.voice!!.micLevel)
+        port.voiceAgentLevel = 0f; port.voiceMicLevel = 0f; port.voiceConnected = false
+        port.listeners.single().onLevels(0f, 0f)
+        assertEquals(0f to 0f, heard.voice!!.agentLevel to heard.voice!!.micLevel)
     }
 
     @Test

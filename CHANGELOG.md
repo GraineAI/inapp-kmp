@@ -1,3 +1,10 @@
+## 0.14.1
+
+- **Booking follows the agent's calling hours.** `bookingSlots(day)` and the SDK's booking sheet offer only times inside the agent's calling window, in the user's time zone, so a picker of your own never offers a time Graine would refuse. The window is part of the scheduling rules (`callingWindow`: start, end, days).
+- **Talk levels on Android too:** `GraineVoiceInfo.agentLevel` and `micLevel` now move on both platforms.
+- **The call's transcript:** `GraineCallInfo.captions`.
+- **A chat whose retries are spent:** `Graine.chat.failed` (true until the user retries). `status` is unchanged.
+
 ## 0.14.0
 
 - **The chat keeps its conversation.** Through the Android SDK 0.14.0 and, in the iOS app, `GraineInApp` 0.14.0, `GraineChat()` (and `GraineViews.chat()` on iOS) no longer ends the conversation when it leaves the screen: it stays connected until it has been idle for 5 minutes, so the chat opened again continues it, with no new welcome. When Graine ends an idle conversation the header reads *Disconnected* until the user opens the chat or writes again, and when a conversation cannot continue a line — *Disconnected · new conversation* — replaces a stacked second welcome. `Graine.chat.turns` is unchanged. Nothing to change in your app.
@@ -11,6 +18,9 @@
 - **Calls start on the loudspeaker** unless a headset is connected; `Graine.calls.speakerByDefault = false` (set before configure) starts them on the earpiece on Android.
 - **A call connects sooner on a slow network.** A call no longer waits on the background readiness check before it dials; the request that sets the call up gives up after 1.5 seconds and takes Graine's web route instead; and the 12-second dial budget starts once that request has answered, so a slow setup no longer eats the time a call has to connect.
 - **Why a call ended:** `GraineCallInfo.endCause` and `GraineCallOutcome`'s cause (`local_end`, `remote_bye`, `media_drop`, `audio_watch`, `failed`).
+- **A chat belongs to the user it was opened for.** Identifying the user after the chat opened reconnects it as that user at once, and their conversation continues; signing out or switching user closes the previous user's chat and clears its lines. Lines that had not gone out (sending or failed) are kept and sent on the next connection.
+- **Chat sessions:** `Graine.chat.sessionId`, `Graine.chat.sessions` (`GraineChatSession`: id, start and end, chat or voice, message count, current) and `session` on every `GraineChatTurn` — the id Execution Logs shows, for a list of past conversations of your own.
+- **Your own call screen on Android:** `GraineCallsConfig.androidCallActivity` names an activity of your app that opens for rings, calls and missed calls (ignored on iOS).
 
 ## 0.13.1
 

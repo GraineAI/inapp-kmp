@@ -187,6 +187,12 @@ data class GraineSchedulingRules(
     val hostedRinging: Boolean = false,
     /** The platforms Graine rings. Empty from the server means every platform. */
     val platforms: List<GrainePlatform> = emptyList(),
+    /**
+     * The agent's calling window, as booking applies it: the booking sheet and
+     * [Graine.bookingSlots] offer only the times inside it. Null when the agent
+     * has none — every time between [earliest] and [latest] is offered.
+     */
+    val callingWindow: GraineCallingWindow? = null,
 ) {
     /** The soonest time a booking is accepted: now plus [minLeadMinutes]. */
     fun earliest(now: Instant = Clock.System.now()): Instant = now + minLeadMinutes.minutes
@@ -194,6 +200,21 @@ data class GraineSchedulingRules(
     /** The latest time a booking is accepted: now plus [maxDaysAhead] days. */
     fun latest(now: Instant = Clock.System.now()): Instant = now + maxDaysAhead.days
 }
+
+/**
+ * THE AGENT'S CALLING WINDOW, as booking applies it: the hours Graine may ring
+ * a booked call. [start] is offered, [end] is not ("HH:MM", 24-hour; a window
+ * never crosses midnight), on the [days] listed — 0 Monday … 6 Sunday — all
+ * read on the device's clock, in its own time zone, as Graine checks a booking.
+ */
+data class GraineCallingWindow(
+    /** The first time of day offered, "HH:MM". */
+    val start: String,
+    /** The time of day the window closes, "HH:MM" — never offered itself. */
+    val end: String,
+    /** The days it is open: 0 Monday … 6 Sunday, each once, in order. */
+    val days: List<Int>,
+)
 
 /** What the dashboard says about this agent, once the session has loaded. */
 data class GraineSession(

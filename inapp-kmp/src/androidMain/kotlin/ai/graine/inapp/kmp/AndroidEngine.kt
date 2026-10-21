@@ -190,7 +190,12 @@ internal class AndroidEngine(
         sink.chat(port.chatTurns.map { AndroidMapping.turn(it) }, status, port.chatTyping)
         sink.chatExtras(
             AndroidMapping.extras(port.chatQuickReplies, port.chatEnded, port.chatRating, port.chatPinned)
-                .copy(newConversationBefore = port.chatNewConversationBefore, sessionId = port.chatSessionId),
+                .copy(
+                    newConversationBefore = port.chatNewConversationBefore,
+                    sessionId = port.chatSessionId,
+                    // Every retry spent, as the Android SDK's chat window says it: not connected, and gave up.
+                    failed = port.chatFailed && !port.chatConnected,
+                ),
         )
         sink.upcomingCalls(port.chatUpcomingCalls.map { AndroidMapping.scheduledCall(it) })
     }
@@ -270,6 +275,9 @@ internal class AndroidEngine(
                 agentLevel = if (c != null) port.callAgentLevel.coerceIn(0f, 1f) else 0f,
                 startedAt = startedAtOf(port.callConnectedAt).takeIf { c != null },
                 connection = port.callConnection?.takeIf { c != null }?.let { AndroidMapping.connection(it) },
+                // The Android SDK keeps them through the call's end and lets them go when it is idle again.
+                captions = if (state == GraineCallState.IDLE) emptyList()
+                    else port.callCaptions.map { GraineCaption(AndroidMapping.role(it.role), it.text, it.live) },
             )
         )
     }
@@ -389,6 +397,8 @@ internal class AndroidEngine(
                 connected, connecting, port.voiceMuted, port.voiceCaptionsOn, captions,
                 status = status,
                 error = error.takeIf { status == GraineVoiceStatus.FAILED },
+                agentLevel = port.voiceAgentLevel.coerceIn(0f, 1f).takeIf { connected } ?: 0f,
+                micLevel = port.voiceMicLevel.coerceIn(0f, 1f).takeIf { connected } ?: 0f,
                 transport = Bridge.transport(port.voiceTransport),
                 transportFallbackReason = port.voiceTransportFallbackReason,
             )
@@ -428,6 +438,8 @@ internal class AndroidEngine(
         override fun onTransport(transport: Transport, requested: Transport, reason: String?, message: String?) = publishVoice()
         override fun onConnectProgress(stage: ConnectStage?, slow: Boolean, failed: Boolean) = publishVoice()
         override fun onReconnecting(active: Boolean) = publishVoice()
+        // About five times a second while live; once more to 0 at the end.
+        override fun onLevels(agent: Float, mic: Float) = publishVoice()
 
         override fun onWidget(widget: JSONObject) {
             componentOf(AndroidMapping.map(widget))?.let { sink.event(GraineEvent.Component(it)) }

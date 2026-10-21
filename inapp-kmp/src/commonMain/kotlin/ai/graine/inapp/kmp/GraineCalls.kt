@@ -173,6 +173,14 @@ data class GraineCallInfo(
      * predates it; its outcome carries the last of it.
      */
     val connection: GraineCallConnection? = null,
+    /**
+     * THE CALL'S LIVE TRANSCRIPT, as the call screen draws it: what has been
+     * said, oldest first — the agent's lines as they are spoken, the user's as
+     * they are heard, a live line replaced as its words arrive ([caption] is
+     * the last of them) — the last 12. Kept through ENDED, empty with no call.
+     * On iOS it needs the GraineInApp of this version. New in 0.14.1.
+     */
+    val captions: List<GraineCaption> = emptyList(),
 ) {
     /** A call screen has something to show: a call, or a missed ring to call back. */
     val showsCallScreen: Boolean get() = state != GraineCallState.IDLE || missedCall != null

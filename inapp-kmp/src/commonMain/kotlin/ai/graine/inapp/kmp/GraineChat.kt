@@ -246,9 +246,10 @@ enum class GraineChatStatus {
     /** The connection dropped and is being made again. */
     RECONNECTING,
     /**
-     * It could not reconnect: every retry was spent. A message, or
-     * [GraineChat.retry], connects again. Never for a conversation the agent
-     * ended — that is [IDLE], with [GraineChat.ended] true.
+     * It could not reconnect: every retry was spent ([GraineChat.failed] says
+     * so too). A message, or [GraineChat.retry], connects again. Never for a
+     * conversation the agent ended — that is [IDLE], with [GraineChat.ended]
+     * true.
      */
     OFFLINE,
     /**
@@ -295,6 +296,17 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     val turns: StateFlow<List<GraineChatTurn>> = agent.chatTurns.asStateFlow()
 
     val status: StateFlow<GraineChatStatus> = agent.chatStatus.asStateFlow()
+
+    /**
+     * THE CHAT GAVE UP: every retry was spent and it will not connect again
+     * by itself — where the SDK's chat window offers a tap to try again. True
+     * until the user sends a message or tries again ([retry], [open], [send]),
+     * when it connects again. [status] says
+     * [GraineChatStatus.OFFLINE] meanwhile, as it always has. Never for a
+     * conversation the agent ended ([ended]) or Graine closed
+     * ([GraineChatStatus.DISCONNECTED]). New in 0.14.1.
+     */
+    val failed: StateFlow<Boolean> = agent.chatFailed.asStateFlow()
 
     /** The agent is working on a reply: from the user's message until its first words. */
     val typing: StateFlow<Boolean> = agent.chatTyping.asStateFlow()
@@ -535,17 +547,15 @@ data class GraineVoiceInfo(
     /**
      * The agent's voice level as it is heard, 0–1 — for a meter or a
      * visualiser of your own. Updates about five times a second while the call
-     * is live, and is 0 otherwise. On iOS it needs the GraineInApp of this
-     * version; on Android the voice bar's call does not report levels yet, so
-     * it stays 0 there (a native call's level is [GraineCallInfo.agentLevel]).
-     * New in 0.14.0.
+     * is live, and is 0 otherwise. On iOS it needs the GraineInApp of 0.14.0
+     * or later; on Android, 0.14.1 or later. New in 0.14.0.
      */
     val agentLevel: Float = 0f,
     /**
      * The user's microphone level, 0–1 — for a "you are being heard" meter.
-     * Updates about five times a second while the call is live, and is 0 with
-     * no call. On iOS it needs the GraineInApp of this version; on Android it
-     * stays 0 for now, as [agentLevel] does. New in 0.14.0.
+     * Updates about five times a second while the call is live; 0 while muted
+     * and with no call. On iOS it needs the GraineInApp of 0.14.0 or later; on
+     * Android, 0.14.1 or later. New in 0.14.0.
      */
     val micLevel: Float = 0f,
     /**
