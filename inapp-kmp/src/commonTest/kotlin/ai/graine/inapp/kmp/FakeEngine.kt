@@ -119,6 +119,20 @@ internal class FakeEngine : GraineEngine {
     /** The paperclip's handler as the platform holds it. */
     var attachHandler: (() -> Unit)? = null
     override fun chatSetAttachHandler(handler: (() -> Unit)?) { attachHandler = handler; calls += "attach:${handler != null}" }
+    override fun chatRefreshPastSessions() { calls += "refreshPastSessions" }
+    override fun chatLoadMorePastSessions() { calls += "loadMorePastSessions" }
+    /** What a transcript answers; null leaves it waiting (the test answers through `transcriptDone`). */
+    var transcriptAnswer: Result<GraineSessionTranscript>? = null
+    var transcriptDone: ((Result<GraineSessionTranscript>) -> Unit)? = null
+    override fun chatSessionTranscript(id: String, done: (Result<GraineSessionTranscript>) -> Unit) {
+        calls += "sessionTranscript:$id"
+        transcriptDone = done
+        transcriptAnswer?.let(done)
+    }
+    /** Every close delay the shared code set, in order. */
+    val closeDelays = mutableListOf<Int>()
+    override var chatCloseDelaySeconds: Int = 15
+        set(value) { field = value; closeDelays += value }
 
     override fun callsConfigure(config: GraineCallsConfig) { callsConfig = config; calls += "callsConfigure" }
     override fun callsEnableVoIPPushes() { calls += "enableVoIPPushes" }

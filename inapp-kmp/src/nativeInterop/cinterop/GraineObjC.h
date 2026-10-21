@@ -27,6 +27,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface GraineObjCChat : NSObject
 @property (nonatomic, readonly) NSString *snapshotJSON;
 @property (nonatomic, readonly) NSArray<GraineObjCQuickReply *> *quickReplies;
+@property (nonatomic, readonly) NSString *pastSessionsJSON;
+@property (nonatomic) NSInteger closeDelaySeconds;
 - (void)open;
 - (void)openWithSize:(nullable NSString *)size;
 - (void)newConversationWithCompletion:(void (^)(NSError * _Nullable error))completion;
@@ -44,6 +46,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)clearPin;
 - (void)setAttachHandler:(void (^ _Nullable)(void))handler;
 - (void)setShown:(BOOL)visible;
+- (void)refreshPastSessions;
+- (void)loadMorePastSessions;
+- (void)sessionTranscriptJSONWithId:(NSString *)sessionId completion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (GraineObjCRegistration *)observe:(void (^)(void))observer;
 @end
 

@@ -21,6 +21,8 @@ import ai.graine.inapp.GraineField as NativeField
 import ai.graine.inapp.GraineInApp
 import ai.graine.inapp.GraineListener
 import ai.graine.inapp.GraineMemory as NativeMemory
+import ai.graine.inapp.GrainePastSessions as NativePastSessions
+import ai.graine.inapp.GraineSessionTranscript as NativeSessionTranscript
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
 import ai.graine.inapp.GraineScreen as NativeScreen
 import ai.graine.inapp.SessionConfig
@@ -115,6 +117,14 @@ internal interface AndroidPort {
     fun chatSendQuickReply(reply: NativeQuickReply)
     /** The paperclip's handler (GraineChat.onAttach); null: no paperclip. */
     fun chatSetAttach(handler: (() -> Unit)?)
+    /** The user's past sessions as the chat holds them (GraineChat.pastSessions). */
+    val chatPastSessions: NativePastSessions
+    fun chatRefreshPastSessions()
+    fun chatLoadMorePastSessions()
+    /** One past session's transcript (GraineChat.sessionTranscript, its callback form). */
+    fun chatSessionTranscript(id: String, done: GraineCallback<NativeSessionTranscript>)
+    /** How long the chat stays connected once no window shows it, in seconds (GraineChat.closeDelaySeconds). */
+    var chatCloseDelaySeconds: Int
 
     // Native calls (GraineInApp.calls): the app's one call, whichever agent it is with.
     val callState: NativeCallState
@@ -249,6 +259,13 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun chatRate(style: String, value: Int) { g.chat.rate(style, value) }
     override fun chatSendQuickReply(reply: NativeQuickReply) = g.chat.sendQuickReply(reply)
     override fun chatSetAttach(handler: (() -> Unit)?) { g.chat.onAttach = handler }
+    override val chatPastSessions: NativePastSessions get() = g.chat.pastSessions
+    override fun chatRefreshPastSessions() = g.chat.refreshPastSessions()
+    override fun chatLoadMorePastSessions() = g.chat.loadMorePastSessions()
+    override fun chatSessionTranscript(id: String, done: GraineCallback<NativeSessionTranscript>) = g.chat.sessionTranscript(id, done)
+    override var chatCloseDelaySeconds: Int
+        get() = g.chat.closeDelaySeconds
+        set(value) { g.chat.closeDelaySeconds = value }
 
     override val callState: NativeCallState get() = g.calls.state
     override val call: GraineCall? get() = g.calls.call

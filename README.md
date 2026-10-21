@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.14.1")
-            implementation("ai.graine:inapp-kmp-compose:0.14.1")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.14.3")
+            implementation("ai.graine:inapp-kmp-compose:0.14.3")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -75,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.14.1`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.14.3`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.14.1'`
-  (or `pod 'GraineInApp', '~> 0.14.1'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.14.1"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.14.3'`
+  (or `pod 'GraineInApp', '~> 0.14.3'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.14.3"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -107,8 +107,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.14.1 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.14.1 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.14.3 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.14.3 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -492,7 +492,7 @@ fun SupportChat() {
     val freshBefore by Graine.chat.newConversationBefore.collectAsState()
 
     // Say when your screen comes and goes: the chat connects while it shows,
-    // and stays connected for 5 quiet minutes after, as the SDK's own does.
+    // and closes 15 seconds after it goes (closeDelaySeconds), as the SDK's own does.
     DisposableEffect(Unit) {
         Graine.chat.shown(true)
         onDispose { Graine.chat.shown(false) }
@@ -547,9 +547,49 @@ Messages kept before sessions were recorded make one session with no id; with
 a server that does not name sessions yet, the whole conversation is one session
 with no id and `sessionId` is null.
 
+**Past sessions** (0.14.3): the signed-in user's earlier sessions with the
+agent — their past chats, talks and calls, newest first, like the dashboard's
+Execution History — and each one's messages. `pastSessions` is
+`{sessions, loading, hasMore, error}`; `refreshPastSessions()` loads the first
+page, `loadMorePastSessions()` appends the next, and
+`sessionTranscript(id)` answers one session's messages, oldest first. Only the
+signed-in user's own, from one of their devices; the list clears when the
+identity changes.
+
+```kotlin
+@Composable
+fun History(open: (GraineSessionTranscript) -> Unit) {
+    val past by Graine.chat.pastSessions.collectAsState()
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { Graine.chat.refreshPastSessions() }
+    LazyColumn {
+        items(past.sessions, key = { it.id }) { s ->
+            ListItem(
+                headlineContent = { Text(s.preview.ifEmpty { s.channel.wire }) },  // the user's first line
+                supportingContent = { Text("${s.status} · ${s.turns} messages · ${s.startedAt}") },
+                modifier = Modifier.clickable {
+                    scope.launch { runCatching { Graine.chat.sessionTranscript(s.id) }.onSuccess(open) }
+                },
+            )
+        }
+        item {
+            if (past.loading) CircularProgressIndicator()
+            else if (past.hasMore) LaunchedEffect(past.sessions.size) { Graine.chat.loadMorePastSessions() }
+        }
+    }
+    if (past.error == "identity_required") Text("Sign in to see your conversations")
+}
+```
+
 `DISCONNECTED` means Graine ended the conversation itself after it had been
 idle for 5 minutes, or at the session's time limit: the lines stay, and the
-user's next message (or opening the chat again) connects again. When a new
+user's next message (or opening the chat again) connects again. A chat no
+screen shows closes by itself, normally, 15 seconds after the last screen
+left it (`GraineConfig.chatCloseDelaySeconds`, 0–300; `closeDelaySeconds`
+changes it while the app runs) — a screen back within that time continues the
+same connection, and opened later a signed-in user's conversation continues
+from Graine's history, with no new welcome (0.14.3; it was 5 quiet minutes
+before). When a new
 conversation begins under earlier lines, `newConversationBefore` names the
 message a "Disconnected · new conversation" row goes before;
 `GraineChatRows.build` places it. When the agent ends the conversation,
@@ -755,8 +795,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.14.1 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.14.1 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.14.3 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.14.3 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

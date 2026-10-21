@@ -2,7 +2,7 @@ package ai.graine.inapp.kmp
 
 /** This library's version: what it says it is, the same on Android and iOS. */
 object GraineKmpVersion {
-    const val NAME = "0.14.1"
+    const val NAME = "0.14.3"
 }
 
 /**
@@ -44,6 +44,17 @@ data class GraineConfig(
      * follows the dashboard; a size passed to [GraineChat.open] wins for that open.
      */
     val chatSize: GraineChatSize? = null,
+    /**
+     * How long the chat stays connected once no screen shows it, in seconds:
+     * the conversation closes this long after the last screen left it (or
+     * after its last message, whichever is later), unless a screen shows it
+     * again first — long enough for a quick hop to the booking sheet or a
+     * component. 15 by default; 0 closes it as soon as the last screen
+     * leaves; kept within 0–300 (a negative value is 0).
+     * [GraineChat.closeDelaySeconds] changes it while the app runs. On iOS it
+     * needs the GraineInApp of this version. New in 0.14.3.
+     */
+    val chatCloseDelaySeconds: Int = 15,
 )
 
 /** How the voice bar's audio travels. */

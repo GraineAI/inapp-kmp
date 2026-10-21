@@ -27,7 +27,9 @@ internal actual fun createPlatformEngine(config: GraineConfig, name: String): Gr
             config.transport?.wire, variables, name, size.wire,
         )
     } ?: throw IllegalStateException("The iOS SDK did not configure the agent \"$name\".")
-    return IosEngine(facade)
+    // How long the chat stays connected once no screen shows it: the app's, read at configure (a GraineInApp
+    // from before 0.14.3 keeps its own).
+    return IosEngine(facade).also { it.chatCloseDelaySeconds = ChatCloseDelay.clamp(config.chatCloseDelaySeconds) }
 }
 
 internal actual class GraineLock actual constructor() {

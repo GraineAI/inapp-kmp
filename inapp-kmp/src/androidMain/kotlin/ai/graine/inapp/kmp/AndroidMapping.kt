@@ -19,6 +19,9 @@ import ai.graine.inapp.GraineConfig as NativeConfig
 import ai.graine.inapp.GraineError
 import ai.graine.inapp.GraineField as NativeField
 import ai.graine.inapp.GraineMemory as NativeMemory
+import ai.graine.inapp.GrainePastSessions as NativePastSessions
+import ai.graine.inapp.GraineSessionSummary as NativeSessionSummary
+import ai.graine.inapp.GraineSessionTranscript as NativeSessionTranscript
 import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
 import ai.graine.inapp.GraineScreen as NativeScreen
@@ -48,6 +51,7 @@ internal object AndroidMapping {
         debug = c.debug,
         captureTaps = c.captureTaps,
         chatSize = c.chatSize?.let { chatSize(it) },
+        chatCloseDelaySeconds = ChatCloseDelay.clamp(c.chatCloseDelaySeconds),
     )
 
     /** The same three sizes, by name. */
@@ -93,6 +97,33 @@ internal object AndroidMapping {
     fun instant(d: Date?): Instant? = d?.let { Instant.fromEpochMilliseconds(it.time) }
 
     fun memory(m: NativeMemory): GraineMemory = GraineMemory(m.id, m.text, instant(m.createdAt), instant(m.updatedAt))
+
+    /** The Android SDK's past sessions, field for field: the same words (channel, direction), its times as instants. */
+    fun pastSessions(p: NativePastSessions): GrainePastSessions =
+        GrainePastSessions(p.sessions.map { sessionSummary(it) }, p.loading, p.hasMore, p.error)
+
+    fun sessionSummary(s: NativeSessionSummary): GraineSessionSummary = GraineSessionSummary(
+        id = s.id,
+        startedAt = Instant.fromEpochMilliseconds(s.startedAt.time),
+        endedAt = instant(s.endedAt),
+        durationSeconds = s.durationSeconds,
+        channel = PastSessionsWire.channel(s.channel.wire),
+        direction = PastSessionsWire.direction(s.direction?.wire),
+        status = s.status,
+        turns = s.turns,
+        preview = s.preview,
+    )
+
+    fun transcript(t: NativeSessionTranscript): GraineSessionTranscript = GraineSessionTranscript(
+        id = t.id,
+        startedAt = instant(t.startedAt),
+        endedAt = instant(t.endedAt),
+        durationSeconds = t.durationSeconds,
+        channel = PastSessionsWire.channel(t.channel.wire),
+        direction = PastSessionsWire.direction(t.direction?.wire),
+        status = t.status,
+        turns = t.turns.map { GraineSessionTurn(role(it.role), it.text, Instant.fromEpochMilliseconds(it.at.time)) },
+    )
 
     /** The Android SDK's booked call, word for word: the shared types read the same wire words. */
     fun scheduledCall(c: NativeScheduledCall): GraineScheduledCall = GraineScheduledCall(

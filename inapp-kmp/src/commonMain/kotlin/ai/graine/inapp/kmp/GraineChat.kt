@@ -290,6 +290,10 @@ enum class GraineChatStatus {
  * window asks how it went where the design does ([rating], [onRated],
  * [rate]). The app can pin what the conversation is about ([pin]) and take
  * attachments ([onAttach]).
+ *
+ * The user's earlier sessions with the agent, and each one's chat history,
+ * are [pastSessions] and [sessionTranscript]. Once no screen shows the chat,
+ * it closes [closeDelaySeconds] later (15 by default).
  */
 class GraineChat internal constructor(private val agent: GraineAgent) {
     /** What has been said, oldest first. */
@@ -374,6 +378,35 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     val sessions: StateFlow<List<GraineChatSession>> = agent.chatSessions.asStateFlow()
 
     /**
+     * THE USER'S PAST SESSIONS with this agent — their earlier chats, talks
+     * and calls, newest first, as Execution History lists them
+     * ([GrainePastSessions]: `sessions`, `loading`, `hasMore`, `error`). Empty
+     * until [refreshPastSessions]; [loadMorePastSessions] appends the next
+     * page, and [sessionTranscript] answers one session's chat history. Only
+     * for the user `identify` names, from a device bound to them — `error`
+     * says why not (`identity_required`, `device_limit`, `rate_limited`,
+     * `unavailable`, `network`) — and cleared when the identity changes
+     * (another user, or nobody). The session open now is never in it. On iOS
+     * it needs the GraineInApp of this version (an older one keeps it empty).
+     * New in 0.14.3.
+     */
+    val pastSessions: StateFlow<GrainePastSessions> = agent.chatPastSessions.asStateFlow()
+
+    /**
+     * How long the conversation stays connected once no screen shows it, in
+     * seconds: it closes this long after the last screen left it — or after
+     * the last message either way, whichever is later — unless a screen shows
+     * it again first ([shown]). Starts as [GraineConfig.chatCloseDelaySeconds]
+     * (15 by default); 0 closes it as soon as the last screen leaves. Kept
+     * within 0–300 (a negative value is 0). Set it any time after
+     * [Graine.configure]: a close already waiting takes the new delay. On iOS
+     * it needs the GraineInApp of this version. New in 0.14.3.
+     */
+    var closeDelaySeconds: Int
+        get() = agent.engineOrNull()?.chatCloseDelaySeconds ?: ChatCloseDelay.DEFAULT_SECONDS
+        set(value) { agent.engine().chatCloseDelaySeconds = ChatCloseDelay.clamp(value) }
+
+    /**
      * The user rated the conversation — in the chat window's rating card, or
      * through [rate]. On the main thread, once for each rating. The answer is
      * also recorded on the conversation; [rating] keeps it.
@@ -432,12 +465,15 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     /**
      * A chat screen of your own came on screen (`true`) or left it (`false`)
      * — say so in pairs, so the conversation lives as the SDK's own chat's
-     * does: connected while a screen shows it, and with none, kept until it
-     * has been idle for 5 minutes (no message either way), then closed —
-     * opening it again within that time continues it, with no new welcome.
-     * The SDK's `GraineChat()` says so itself. A chat nobody reports stays
-     * connected until Graine's own idle limit. On iOS it needs the GraineInApp
-     * of this version (an older one connects on [open] as before).
+     * does: connected while a screen shows it, and with none, closed
+     * [closeDelaySeconds] later (15 by default; a message either way in that
+     * time starts the wait again) — a screen showing it again within that
+     * time continues it on the same connection; opened later, it connects
+     * again, and a signed-in user's conversation continues from Graine's
+     * history, with no new welcome. The SDK's `GraineChat()` says so itself.
+     * A chat nobody reports stays connected until Graine's own idle limit.
+     * It closed after 5 idle minutes in 0.14.0–0.14.1. On iOS it needs the
+     * GraineInApp of this version (an older one connects on [open] as before).
      */
     fun shown(visible: Boolean) = agent.engine().chatShown(visible)
 
@@ -510,6 +546,37 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
      * `network`…); the chat is then as it was.
      */
     suspend fun newConversation() = agent.newConversation()
+
+    /**
+     * Load the first page of [pastSessions] — the user's most recent sessions
+     * with this agent — replacing what was loaded. While it loads, `loading`
+     * is true and what was loaded stays; a refusal keeps it too, with `error`
+     * saying why. With nobody signed in nothing is asked: `error` is
+     * `identity_required` at once. New in 0.14.3.
+     */
+    fun refreshPastSessions() = agent.engine().chatRefreshPastSessions()
+
+    /**
+     * Load the next page of [pastSessions] and append it — a session already
+     * listed is not listed twice. Nothing happens while a page is loading,
+     * and when there is no next page (`hasMore` false, or nothing loaded yet:
+     * [refreshPastSessions] loads the first). After a refusal, calling it
+     * again asks for the same page. New in 0.14.3.
+     */
+    fun loadMorePastSessions() = agent.engine().chatLoadMorePastSessions()
+
+    /**
+     * ONE PAST SESSION'S CHAT HISTORY, oldest first — the session as
+     * [pastSessions] describes it, and every message said in it. Only the
+     * signed-in user's own. Throws [GraineException]: `invalid_request` for a
+     * blank id and `identity_required` with nobody signed in (nothing is
+     * sent); `not_found` for a session Graine does not know or that is
+     * another user's — and for an answer that arrives after the identity
+     * changed; `device_limit`, `rate_limited`, `unavailable`, `network`. On
+     * iOS it needs the GraineInApp of this version (an older one throws
+     * `unavailable`). New in 0.14.3.
+     */
+    suspend fun sessionTranscript(id: String): GraineSessionTranscript = agent.sessionTranscript(id)
 }
 
 /** The voice bar's call, as a screen draws it. */

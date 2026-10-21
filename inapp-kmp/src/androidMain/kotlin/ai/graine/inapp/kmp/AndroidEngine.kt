@@ -183,6 +183,22 @@ internal class AndroidEngine(
     override fun chatSendQuickReply(reply: GraineQuickReply) = port.chatSendQuickReply(AndroidMapping.quickReply(reply))
     override fun chatSetAttachHandler(handler: (() -> Unit)?) = onMain { port.chatSetAttach(handler) }
 
+    // Past sessions: the Android SDK's own list, its paging and its rules (who it belongs to, what is kept).
+    override fun chatRefreshPastSessions() = onMain { port.chatRefreshPastSessions() }
+    override fun chatLoadMorePastSessions() = onMain { port.chatLoadMorePastSessions() }
+
+    override fun chatSessionTranscript(id: String, done: (Result<GraineSessionTranscript>) -> Unit) = port.chatSessionTranscript(id) { t, error ->
+        when {
+            error != null -> done(Result.failure(AndroidMapping.error(error)))
+            t != null -> done(Result.success(AndroidMapping.transcript(t)))
+            else -> done(Result.failure(GraineException(GraineErrorCode.Unavailable, "Graine did not answer.")))
+        }
+    }
+
+    override var chatCloseDelaySeconds: Int
+        get() = port.chatCloseDelaySeconds
+        set(value) { port.chatCloseDelaySeconds = value }
+
     private fun publishChat() {
         val status = ChatInference.status(
             port.chatConnected, port.chatConnecting, port.chatFailed, port.chatReconnecting, port.chatDisconnected, port.chatEnded,
@@ -198,6 +214,7 @@ internal class AndroidEngine(
                 ),
         )
         sink.upcomingCalls(port.chatUpcomingCalls.map { AndroidMapping.scheduledCall(it) })
+        sink.pastSessions(AndroidMapping.pastSessions(port.chatPastSessions))
     }
 
     // ── native calls ──────────────────────────────────────────────────────

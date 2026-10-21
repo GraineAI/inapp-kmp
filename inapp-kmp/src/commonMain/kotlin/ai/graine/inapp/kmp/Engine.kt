@@ -85,6 +85,18 @@ internal interface GraineEngine {
     fun chatSendQuickReply(reply: GraineQuickReply)
     /** The app's attachment handler (main thread), or null: the chat window draws its paperclip only with one. */
     fun chatSetAttachHandler(handler: (() -> Unit)?)
+    /** Load the first page of the user's past sessions, replacing what was loaded ([GraineChat.refreshPastSessions]). */
+    fun chatRefreshPastSessions()
+    /** Load the next page of past sessions and append it ([GraineChat.loadMorePastSessions]). */
+    fun chatLoadMorePastSessions()
+    /** One past session's transcript, or Graine's refusal ([GraineChat.sessionTranscript]). */
+    fun chatSessionTranscript(id: String, done: (Result<GraineSessionTranscript>) -> Unit)
+    /**
+     * How long the chat stays connected once no window shows it, in seconds
+     * (already kept within 0–300): the platform SDK's own value, read and set
+     * ([GraineChat.closeDelaySeconds]).
+     */
+    var chatCloseDelaySeconds: Int
 
     fun callsConfigure(config: GraineCallsConfig)
     fun callsEnableVoIPPushes()
@@ -129,6 +141,8 @@ internal interface EngineSink {
     fun chatExtras(extras: ChatExtras) {}
     /** The chat's upcoming calls (its card's), soonest first. */
     fun upcomingCalls(calls: List<GraineScheduledCall>)
+    /** The user's past sessions as the platform SDK holds them. A platform SDK that has none never reports them: the empty state stands. */
+    fun pastSessions(state: GrainePastSessions) {}
     fun calls(info: GraineCallInfo)
     fun callOutcome(outcome: GraineCallOutcome)
     fun incomingCall(call: GraineIncomingCall)

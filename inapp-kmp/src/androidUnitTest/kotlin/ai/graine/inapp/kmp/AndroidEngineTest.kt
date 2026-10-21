@@ -26,6 +26,8 @@ import ai.graine.inapp.GraineErrorCode as NativeErrorCode
 import ai.graine.inapp.GraineField as NativeField
 import ai.graine.inapp.GraineListener
 import ai.graine.inapp.GraineMemory as NativeMemory
+import ai.graine.inapp.GrainePastSessions as NativePastSessions
+import ai.graine.inapp.GraineSessionTranscript as NativeSessionTranscript
 import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
 import ai.graine.inapp.GraineSchedulingRules as NativeRules
@@ -75,6 +77,8 @@ class AndroidEngineTest {
         override fun chatExtras(extras: ChatExtras) { this.extras = extras }
         var upcoming: List<GraineScheduledCall>? = null
         override fun upcomingCalls(calls: List<GraineScheduledCall>) { upcoming = calls }
+        var past: GrainePastSessions? = null
+        override fun pastSessions(state: GrainePastSessions) { past = state }
         override fun calls(info: GraineCallInfo) { calls = info }
         override fun callOutcome(outcome: GraineCallOutcome) { outcomes += outcome }
         override fun incomingCall(call: GraineIncomingCall) { incoming += call }
@@ -173,6 +177,12 @@ class AndroidEngineTest {
         override fun chatSendQuickReply(reply: NativeQuickReply) { repliesSent += reply; did += "sendQuickReply:${reply.text}" }
         var attach: (() -> Unit)? = null
         override fun chatSetAttach(handler: (() -> Unit)?) { attach = handler; did += "attach:${handler != null}" }
+        override var chatPastSessions = NativePastSessions()
+        override fun chatRefreshPastSessions() { did += "refreshPastSessions" }
+        override fun chatLoadMorePastSessions() { did += "loadMorePastSessions" }
+        var transcriptDone: GraineCallback<NativeSessionTranscript>? = null
+        override fun chatSessionTranscript(id: String, done: GraineCallback<NativeSessionTranscript>) { did += "sessionTranscript:$id"; transcriptDone = done }
+        override var chatCloseDelaySeconds = 15
         fun chatChanged() = chatListeners.forEach { it.run() }
 
         override var callState = NativeCallState.IDLE
@@ -1286,6 +1296,124 @@ class AndroidEngineTest {
         start()
         engine.dismissWidget("w1")
         assertEquals(listOf("dismissWidget:w1"), port.did)
+    }
+
+    // ── past sessions (0.14.3) ──────────────────────────────────────────
+
+    private val meeras = NativePastSessions(
+        sessions = listOf(
+            ai.graine.inapp.GraineSessionSummary(
+                "ex-7a1c0001", Date(1_792_584_005_000L), Date(1_792_584_281_000L), 276, ai.graine.inapp.GraineSessionChannel.CHAT, null,
+                "completed", 9, "Can I move my check-in call to Friday?",
+            ),
+            ai.graine.inapp.GraineSessionSummary(
+                "ex-31f00002", Date(1_792_483_200_000L), null, null, ai.graine.inapp.GraineSessionChannel.CALL,
+                ai.graine.inapp.GraineSessionDirection.OUTBOUND, "missed", 0, "",
+            ),
+        ),
+        loading = false, hasMore = true, error = null,
+    )
+
+    @Test
+    fun theAndroidSdksPastSessionsCrossFieldForField() {
+        start()
+        assertEquals("nothing loaded yet", GrainePastSessions(), heard.past)
+        port.chatPastSessions = meeras
+        port.chatChanged()
+        assertEquals(
+            GrainePastSessions(
+                sessions = listOf(
+                    GraineSessionSummary(
+                        "ex-7a1c0001", Instant.parse("2026-10-21T12:00:05Z"), Instant.parse("2026-10-21T12:04:41Z"), 276,
+                        GraineSessionChannel.CHAT, null, "completed", 9, "Can I move my check-in call to Friday?",
+                    ),
+                    GraineSessionSummary(
+                        "ex-31f00002", Instant.parse("2026-10-20T08:00:00Z"), null, null, GraineSessionChannel.CALL,
+                        GraineSessionDirection.OUTBOUND, "missed", 0, "",
+                    ),
+                ),
+                hasMore = true,
+            ),
+            heard.past,
+        )
+        // Loading, and a refusal's word, as the Android SDK holds them.
+        port.chatPastSessions = meeras.copy(loading = true)
+        port.chatChanged()
+        assertTrue(heard.past!!.loading)
+        port.chatPastSessions = meeras.copy(error = "device_limit")
+        port.chatChanged()
+        assertEquals("device_limit", heard.past!!.error)
+    }
+
+    @Test
+    fun anotherIdentityClearsTheListAsTheAndroidSdkClearsIt() {
+        start()
+        port.chatPastSessions = meeras
+        port.chatChanged()
+        assertEquals(2, heard.past!!.sessions.size)
+        // identify() another user: the Android SDK lets the last user's list go and tells its change listeners.
+        engine.identify(mapOf("user_id" to "u-arjun"), null)
+        port.chatPastSessions = NativePastSessions()
+        port.chatChanged()
+        assertEquals(GrainePastSessions(), heard.past)
+        assertTrue(port.did.contains("identify:{user_id=u-arjun}:null"))
+    }
+
+    @Test
+    fun refreshAndLoadMoreAreTheAndroidSdks() {
+        start()
+        engine.chatRefreshPastSessions()
+        engine.chatLoadMorePastSessions()
+        assertEquals(listOf("refreshPastSessions", "loadMorePastSessions"), port.did)
+    }
+
+    @Test
+    fun aTranscriptCrossesInTheSharedWordsAndARefusalAsItsCode() {
+        start()
+        var got: Result<GraineSessionTranscript>? = null
+        engine.chatSessionTranscript("ex-7a1c0001") { got = it }
+        assertEquals(listOf("sessionTranscript:ex-7a1c0001"), port.did)
+        port.transcriptDone!!.onResult(
+            NativeSessionTranscript(
+                "ex-7a1c0001", Date(1_792_584_005_000L), null, 276, ai.graine.inapp.GraineSessionChannel.VOICE,
+                ai.graine.inapp.GraineSessionDirection.INBOUND, "completed",
+                listOf(
+                    ai.graine.inapp.GraineSessionTurn(Role.AGENT, "Hi Meera, how can I help?", Date(1_792_584_005_000L)),
+                    ai.graine.inapp.GraineSessionTurn(Role.CUSTOMER, "Can I move my check-in call to Friday?", Date(1_792_584_020_000L)),
+                ),
+            ),
+            null,
+        )
+        assertEquals(
+            GraineSessionTranscript(
+                "ex-7a1c0001", Instant.parse("2026-10-21T12:00:05Z"), null, 276, GraineSessionChannel.VOICE, GraineSessionDirection.INBOUND, "completed",
+                listOf(
+                    GraineSessionTurn(GraineRole.AGENT, "Hi Meera, how can I help?", Instant.parse("2026-10-21T12:00:05Z")),
+                    GraineSessionTurn(GraineRole.USER, "Can I move my check-in call to Friday?", Instant.parse("2026-10-21T12:00:20Z")),
+                ),
+            ),
+            got!!.getOrNull(),
+        )
+        // Every refusal the contract names, as the Android SDK hears it: the same word, as the shared code.
+        for (word in listOf("identity_required", "device_limit", "not_found", "rate_limited", "unavailable", "network", "invalid_request")) {
+            engine.chatSessionTranscript("ex-1") { got = it }
+            port.transcriptDone!!.onResult(null, GraineError(NativeErrorCode.from(word), "Refused."))
+            val e = got!!.exceptionOrNull() as GraineException
+            assertEquals(word, e.code.wire)
+            assertFalse(e.code is GraineErrorCode.Unknown)
+        }
+    }
+
+    @Test
+    fun theCloseDelayIsTheAndroidSdksAndTheConfigsCrossesClamped() {
+        start()
+        assertEquals(15, engine.chatCloseDelaySeconds)
+        engine.chatCloseDelaySeconds = 40
+        assertEquals(40, port.chatCloseDelaySeconds)
+        assertEquals(15, AndroidMapping.config(GraineConfig("https://www.graine.ai", "pk_live_test")).chatCloseDelaySeconds)
+        for ((asked, kept) in listOf(0 to 0, 40 to 40, -5 to 0, 301 to 300, 1000 to 300)) {
+            assertEquals("$asked", kept, AndroidMapping.config(GraineConfig("https://www.graine.ai", "pk_live_test", chatCloseDelaySeconds = asked)).chatCloseDelaySeconds)
+        }
     }
 }
 

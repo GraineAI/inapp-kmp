@@ -67,6 +67,7 @@ class GraineAgent internal constructor(
     internal val chatNewConversationBefore = MutableStateFlow<List<String>>(emptyList())
     internal val chatSessionId = MutableStateFlow<String?>(null)
     internal val chatSessions = MutableStateFlow<List<GraineChatSession>>(emptyList())
+    internal val chatPastSessions = MutableStateFlow(GrainePastSessions())
     internal val voiceInfo = MutableStateFlow(GraineVoiceInfo())
     internal val themeState = MutableStateFlow<GraineThemeTokens?>(null)
     internal val componentState = MutableStateFlow<GraineComponent?>(null)
@@ -284,6 +285,13 @@ class GraineAgent internal constructor(
     /** A fresh thread in this agent's chat ([GraineChat.newConversation]). */
     internal suspend fun newConversation(): Unit = await { e, done -> e.chatNewConversation(done) }
 
+    /** One past session's transcript ([GraineChat.sessionTranscript]). */
+    internal suspend fun sessionTranscript(id: String): GraineSessionTranscript {
+        val wanted = id.trim()
+        if (wanted.isEmpty()) throw GraineException(GraineErrorCode.InvalidRequest, "No session id.")
+        return await { e, done -> e.chatSessionTranscript(wanted, done) }
+    }
+
     /** The component [id] was answered or closed: it is no longer on screen. */
     internal fun componentDone(id: String) {
         if (componentState.value?.id == id) componentState.value = null
@@ -392,6 +400,10 @@ class GraineAgent internal constructor(
             chatUpcoming.value = calls
         }
 
+        override fun pastSessions(state: GrainePastSessions) {
+            chatPastSessions.value = state
+        }
+
         // The phone has one call engine: one agent reports it for the app (Graine.calls).
         override fun calls(info: GraineCallInfo) = Graine.callsReported(this@GraineAgent) { Graine.callInfo.value = info }
         override fun callOutcome(outcome: GraineCallOutcome) = Graine.callsReported(this@GraineAgent) { Graine.callOutcomes.tryEmit(outcome) }
@@ -424,6 +436,7 @@ class GraineAgent internal constructor(
         chatNewConversationBefore.value = emptyList()
         chatSessionId.value = null
         chatSessions.value = emptyList()
+        chatPastSessions.value = GrainePastSessions()
         ratedHandler = null
         attachHandler = null
         voiceInfo.value = GraineVoiceInfo()

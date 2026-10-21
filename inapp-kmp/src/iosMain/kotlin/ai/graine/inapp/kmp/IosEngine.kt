@@ -231,11 +231,40 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         if (facade.chat.respondsToSelector(SET_ATTACH)) facade.chat.setAttachHandler(handler)
     }
 
+    // Past sessions, new in the facade in 0.14.3 (asked for before each use): a GraineInApp from before them
+    // has none to load — the list stays empty, and a transcript is `unavailable`.
+    override fun chatRefreshPastSessions() {
+        if (facade.chat.respondsToSelector(REFRESH_PAST_SESSIONS)) facade.chat.refreshPastSessions()
+    }
+
+    override fun chatLoadMorePastSessions() {
+        if (facade.chat.respondsToSelector(LOAD_MORE_PAST_SESSIONS)) facade.chat.loadMorePastSessions()
+    }
+
+    /** The facade answers in the wire's own shape, read here by the contract's rules. */
+    override fun chatSessionTranscript(id: String, done: (Result<GraineSessionTranscript>) -> Unit) {
+        if (!facade.chat.respondsToSelector(SESSION_TRANSCRIPT)) {
+            done(Result.failure(GraineException(GraineErrorCode.Unavailable, OLD_IOS_SDK_PAST_SESSIONS)))
+            return
+        }
+        facade.chat.sessionTranscriptJSONWithId(id) { json, error ->
+            if (error != null) done(Result.failure(failure(error))) else done(Result.success(PastSessionsWire.transcript(json, id)))
+        }
+    }
+
+    /** The facade's `closeDelaySeconds`, new in 0.14.3: a GraineInApp from before it keeps its own, and says the default. */
+    override var chatCloseDelaySeconds: Int
+        get() = if (facade.chat.respondsToSelector(CLOSE_DELAY)) facade.chat.closeDelaySeconds.toInt() else ChatCloseDelay.DEFAULT_SECONDS
+        set(value) {
+            if (facade.chat.respondsToSelector(SET_CLOSE_DELAY)) facade.chat.closeDelaySeconds = ChatCloseDelay.clamp(value).toLong()
+        }
+
     private fun publishChat() {
         val chat = Bridge.chat(facade.chat.snapshotJSON)
         sink.chat(chat.turns, chat.status, chat.typing)
         sink.chatExtras(chat.extras)
         sink.upcomingCalls(chat.upcoming)
+        if (facade.chat.respondsToSelector(PAST_SESSIONS_JSON)) sink.pastSessions(PastSessionsWire.state(facade.chat.pastSessionsJSON))
     }
 
     // ── native calls ──────────────────────────────────────────────────────
@@ -325,6 +354,15 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val BOOKING_UNAVAILABLE_REASON = NSSelectorFromString("bookingUnavailableReason")
         private val BOOKING_SLOTS = NSSelectorFromString("bookingSlotsJSONForDay:")
         private val SET_SPEAKER_BY_DEFAULT = NSSelectorFromString("setSpeakerByDefault:")
+        // New in the facade in 0.14.3 (asked for before each use).
+        private val PAST_SESSIONS_JSON = NSSelectorFromString("pastSessionsJSON")
+        private val REFRESH_PAST_SESSIONS = NSSelectorFromString("refreshPastSessions")
+        private val LOAD_MORE_PAST_SESSIONS = NSSelectorFromString("loadMorePastSessions")
+        private val SESSION_TRANSCRIPT = NSSelectorFromString("sessionTranscriptJSONWithId:completion:")
+        private val CLOSE_DELAY = NSSelectorFromString("closeDelaySeconds")
+        private val SET_CLOSE_DELAY = NSSelectorFromString("setCloseDelaySeconds:")
+        private val OLD_IOS_SDK_PAST_SESSIONS =
+            "This app links a GraineInApp without past sessions. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
         private val OLD_IOS_SDK =
             "This app links a GraineInApp without the booking sheet. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
 

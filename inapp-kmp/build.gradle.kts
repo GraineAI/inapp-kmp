@@ -19,16 +19,18 @@ val iosEnabled = providers.gradleProperty("graine.kmp.ios").orNull != "false"
 
 /*
  * THE SHARED CONTRACT'S VECTORS, FOR THE TESTS ON EVERY PLATFORM.
- * sdk/contract/history.json and booking-slots.json are vendored at
- * src/commonTest/contract/ — the exported repository carries no contract
- * folder; HistoryVendoredTest and BookingSlotsVendoredTest hold the copies equal
- * to the contract's — and handed to the common tests as Kotlin strings, since a
- * Kotlin/Native test binary cannot read the source tree.
+ * sdk/contract/history.json, booking-slots.json and past-sessions.json are
+ * vendored at src/commonTest/contract/ — the exported repository carries no
+ * contract folder; HistoryVendoredTest, BookingSlotsVendoredTest and
+ * PastSessionsVendoredTest hold the copies equal to the contract's — and handed
+ * to the common tests as Kotlin strings, since a Kotlin/Native test binary
+ * cannot read the source tree.
  */
 val contractVectors by tasks.registering {
     val vendored = mapOf(
         "HISTORY_JSON" to layout.projectDirectory.file("src/commonTest/contract/history.json"),
         "BOOKING_SLOTS_JSON" to layout.projectDirectory.file("src/commonTest/contract/booking-slots.json"),
+        "PAST_SESSIONS_JSON" to layout.projectDirectory.file("src/commonTest/contract/past-sessions.json"),
     )
     val out = layout.buildDirectory.dir("generated/contract/kotlin")
     vendored.values.forEach { inputs.file(it).withPathSensitivity(PathSensitivity.NONE) }
