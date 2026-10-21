@@ -21,7 +21,14 @@ data class GraineComponent(
     val title: String?,
     /** The whole component as it arrived. */
     val payload: Map<String, Any?>,
-)
+) {
+    /** What it shows — its items, options or slots, as the agent sent them (the payload's `data`); empty when it carries none. */
+    val data: Map<String, Any?>
+        get() = (payload["data"] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v } ?: emptyMap()
+
+    /** The words to show where it cannot be drawn (the payload's `fallback_text`); null when it has none. */
+    val fallbackText: String? get() = (payload["fallback_text"] as? String)?.takeIf { it.isNotBlank() }
+}
 
 /** Where a message was said. */
 enum class GraineChatChannel(
@@ -57,7 +64,66 @@ data class GraineChatTurn(
     val restored: Boolean = false,
     /** Where it was said: typed in the chat, or on a call (a restored turn only). */
     val channel: GraineChatChannel = GraineChatChannel.CHAT,
+    /**
+     * The id of the session it was said in — a chat connection's run, or a
+     * call's id for a voice turn, the id Execution Logs shows. A restored
+     * turn keeps the one Graine kept; a turn said now carries the chat's
+     * [GraineChat.sessionId] (a message typed before the chat connected, the
+     * session of the connection that sends it). Null for turns kept before
+     * sessions were recorded, and with a server that sends none. On iOS it
+     * needs the GraineInApp of this version. New in 0.14.0.
+     */
+    val session: String? = null,
 )
+
+/**
+ * ONE SESSION OF THE CHAT: a run of consecutive turns said in the same
+ * session — a chat connection's run, or a call — for a "past conversations"
+ * list or session dividers of your own ([GraineChat.sessions]). New in 0.14.0.
+ */
+data class GraineChatSession(
+    /** The session's id, as Execution Logs shows it; null for turns kept before sessions were recorded, and with a server that sends none. */
+    val id: String?,
+    /** When its first turn was said. */
+    val startedAt: Instant,
+    /** When its last turn was said. */
+    val endedAt: Instant,
+    /** VOICE when every turn of it was said on a call, else CHAT. */
+    val channel: GraineChatChannel,
+    /** How many turns it holds. */
+    val turns: Int,
+    /** It is the chat's current session: its [id] is [GraineChat.sessionId]. Never for a session with no id. */
+    val current: Boolean,
+)
+
+/**
+ * THE CHAT'S SESSIONS, from its turns (history.json `sessions`): oldest first,
+ * consecutive turns with the same session — null included — make one; its
+ * start and end are its first and last turn's time; a call's when every turn
+ * is voice; current when its id is not null and is [sessionId]. Pure.
+ */
+internal object ChatSessions {
+    fun of(turns: List<GraineChatTurn>, sessionId: String?): List<GraineChatSession> {
+        val out = ArrayList<GraineChatSession>()
+        var i = 0
+        while (i < turns.size) {
+            val id = turns[i].session
+            var j = i
+            while (j + 1 < turns.size && turns[j + 1].session == id) j++
+            val run = turns.subList(i, j + 1)
+            out += GraineChatSession(
+                id = id,
+                startedAt = run.first().at,
+                endedAt = run.last().at,
+                channel = if (run.all { it.channel == GraineChatChannel.VOICE }) GraineChatChannel.VOICE else GraineChatChannel.CHAT,
+                turns = run.size,
+                current = id != null && id == sessionId,
+            )
+            i = j + 1
+        }
+        return out
+    }
+}
 
 /**
  * How big the chat window opens: the dashboard's choice (Embed & Widgets →
@@ -169,14 +235,30 @@ internal expect fun composed(text: String): String
 
 /** Where the chat's connection is. */
 enum class GraineChatStatus {
-    /** Not in the chat: never opened, left, or the app is in the background. */
+    /**
+     * Not in use: never opened, left, or the app is in the background — or the
+     * agent ended the conversation ([GraineChat.ended]) and its connection
+     * closed; the user's next message starts over.
+     */
     IDLE,
     CONNECTING,
     ONLINE,
     /** The connection dropped and is being made again. */
     RECONNECTING,
-    /** It could not reconnect, or the other side ended the conversation. A message, or [GraineChat.retry], connects again. */
+    /**
+     * It could not reconnect: every retry was spent. A message, or
+     * [GraineChat.retry], connects again. Never for a conversation the agent
+     * ended — that is [IDLE], with [GraineChat.ended] true.
+     */
     OFFLINE,
+    /**
+     * Graine ended the conversation itself — idle for 5 minutes, or at the
+     * session's time limit — and it does not reconnect on its own: the lines
+     * stay, the SDK's chat says "Disconnected", and opening the chat or a
+     * message connects again (continued when Graine can continue it). On iOS
+     * it needs the GraineInApp of this version (an older one says [OFFLINE]).
+     */
+    DISCONNECTED,
 }
 
 /**
@@ -248,6 +330,38 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     val pinned: StateFlow<GraineChatPin?> = agent.chatPinned.asStateFlow()
 
     /**
+     * Where Graine began a new conversation under earlier lines — the ids of
+     * the turns a "Disconnected · new conversation" row goes before, oldest
+     * first; empty when there are none. The SDK's chat draws the row; a chat
+     * of your own gets it from [GraineChatRows.build]. Never turns: [turns]
+     * does not change for them, and [newConversation] or [clear] takes them
+     * away with the lines. On iOS it needs the GraineInApp of this version
+     * (an older one reports none).
+     */
+    val newConversationBefore: StateFlow<List<String>> = agent.chatNewConversationBefore.asStateFlow()
+
+    /**
+     * The id of the chat's current session — this connection's run, the id
+     * Execution Logs shows for it — from Graine as the connection starts. Null
+     * until it arrives (each new connection starts without one), and with a
+     * server that sends none. A turn said now carries it
+     * ([GraineChatTurn.session]). On iOS it needs the GraineInApp of this
+     * version (an older one says null). New in 0.14.0.
+     */
+    val sessionId: StateFlow<String?> = agent.chatSessionId.asStateFlow()
+
+    /**
+     * The sessions the conversation on screen holds, oldest first: each run of
+     * consecutive [turns] said in the same session ([GraineChatSession]) — a
+     * chat connection's, or a call's — the current one marked. Turns kept
+     * before sessions were recorded make one with no id; with a server that
+     * sends none, the whole conversation is one session with no id. For a
+     * "past conversations" list, or session dividers of your own. Updates with
+     * [turns] and [sessionId]. New in 0.14.0.
+     */
+    val sessions: StateFlow<List<GraineChatSession>> = agent.chatSessions.asStateFlow()
+
+    /**
      * The user rated the conversation — in the chat window's rating card, or
      * through [rate]. On the main thread, once for each rating. The answer is
      * also recorded on the conversation; [rating] keeps it.
@@ -303,6 +417,18 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     /** The user left: the chat hangs up and stays down. What was said stays. */
     fun close() = agent.engine().chatClose()
 
+    /**
+     * A chat screen of your own came on screen (`true`) or left it (`false`)
+     * — say so in pairs, so the conversation lives as the SDK's own chat's
+     * does: connected while a screen shows it, and with none, kept until it
+     * has been idle for 5 minutes (no message either way), then closed —
+     * opening it again within that time continues it, with no new welcome.
+     * The SDK's `GraineChat()` says so itself. A chat nobody reports stays
+     * connected until Graine's own idle limit. On iOS it needs the GraineInApp
+     * of this version (an older one connects on [open] as before).
+     */
+    fun shown(visible: Boolean) = agent.engine().chatShown(visible)
+
     /** Send a message. Shown at once; sent now, or as soon as the chat is connected. Blank messages are ignored. */
     fun send(text: String) {
         if (text.isBlank()) return
@@ -327,9 +453,26 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
      * bar's call. [data] is the structured answer, for your webhook; [summary]
      * the sentence that is the user's turn ("The Creta, please"), without which
      * the conversation does not move. The SDK's own views answer for
-     * themselves. On iOS it needs the GraineInApp of this version.
+     * themselves. [GraineAgent.component] lets the component go (from 0.14.0).
+     * On iOS it needs the GraineInApp of this version.
      */
-    fun answerWidget(id: String, data: Map<String, Any?>, summary: String) = agent.engine().answerWidget(id, data, summary)
+    fun answerWidget(id: String, data: Map<String, Any?>, summary: String) {
+        agent.engine().answerWidget(id, data, summary)
+        agent.componentDone(id)
+    }
+
+    /**
+     * Close a component the agent drew without answering it, from a UI of
+     * your own — what the close of the SDK's component view does: the agent
+     * is told quietly, so it does not go on about options nobody can see, and
+     * [GraineAgent.component] lets it go. On iOS it needs the GraineInApp of
+     * this version (with an older one only the state lets it go).
+     */
+    fun dismissWidget(id: String) {
+        if (id.isBlank()) return
+        agent.engine().dismissWidget(id)
+        agent.componentDone(id)
+    }
 
     /** Fetch [upcomingCalls] again — after booking one elsewhere (the chat refreshes them itself otherwise). */
     fun refreshUpcomingCalls() = agent.engine().chatRefreshUpcoming()
@@ -374,7 +517,88 @@ data class GraineVoiceInfo(
      * the captions are on or off; [GraineVoice.clearCaptions] forgets them.
      */
     val captions: List<GraineCaption> = emptyList(),
+    /**
+     * Where the call is, in one word — what the SDK's bar says
+     * ([GraineVoiceStatus]): `IDLE` before any call, then CONNECTING,
+     * LISTENING, THINKING, SPEAKING as the conversation moves, MUTED,
+     * RECONNECTING, FAILED, and ENDED once a call has ended. Updates with
+     * every change of the call. New in 0.14.0.
+     */
+    val status: GraineVoiceStatus = GraineVoiceStatus.IDLE,
+    /**
+     * Why the call could not work, as a sentence, while [status] is FAILED —
+     * a setting someone must fix ("This agent is not set up for calls."), or
+     * "The call could not be connected." when nothing could carry it (then
+     * [GraineVoice.start] tries again); null otherwise. New in 0.14.0.
+     */
+    val error: String? = null,
+    /**
+     * The agent's voice level as it is heard, 0–1 — for a meter or a
+     * visualiser of your own. Updates about five times a second while the call
+     * is live, and is 0 otherwise. On iOS it needs the GraineInApp of this
+     * version; on Android the voice bar's call does not report levels yet, so
+     * it stays 0 there (a native call's level is [GraineCallInfo.agentLevel]).
+     * New in 0.14.0.
+     */
+    val agentLevel: Float = 0f,
+    /**
+     * The user's microphone level, 0–1 — for a "you are being heard" meter.
+     * Updates about five times a second while the call is live, and is 0 with
+     * no call. On iOS it needs the GraineInApp of this version; on Android it
+     * stays 0 for now, as [agentLevel] does. New in 0.14.0.
+     */
+    val micLevel: Float = 0f,
+    /**
+     * What the call runs on: [GraineTransport.WEBRTC] or
+     * [GraineTransport.WEBSOCKET], from the moment the call is placed; null
+     * before any call, and kept after a call ends until the next starts.
+     * New in 0.14.0.
+     */
+    val transport: GraineTransport? = null,
+    /**
+     * Why a call that asked for WebRTC runs on the WebSocket instead —
+     * `mint_failed`, `no_answer`, `ice_timeout` and the like, for your logs;
+     * the user hears no difference. Null when it did not fall back. New in 0.14.0.
+     */
+    val transportFallbackReason: String? = null,
 )
+
+/**
+ * WHERE THE VOICE BAR'S CALL IS, in one word — what the SDK's bar says, first
+ * match wins: FAILED ("Unavailable", or "Couldn't connect · tap to retry":
+ * [GraineVoiceInfo.error] says why), RECONNECTING, CONNECTING, MUTED,
+ * THINKING (the user finished a sentence and the agent has not answered yet),
+ * SPEAKING, LISTENING, then ENDED (a call ended and no other has started) or
+ * IDLE.
+ */
+enum class GraineVoiceStatus(
+    /** The word every Graine SDK uses: `idle`, `connecting`, `listening`, `thinking`, `speaking`, `reconnecting`, `muted`, `failed`, `ended`. */
+    val wire: String,
+) {
+    /** No call. Show "Tap to talk". */
+    IDLE("idle"),
+    /** The call is being placed. Show "Connecting…". */
+    CONNECTING("connecting"),
+    /** On the call, waiting for the user to speak. Show "Listening". */
+    LISTENING("listening"),
+    /** The user finished a sentence and the agent has not answered yet. Show "Thinking…". */
+    THINKING("thinking"),
+    /** The agent is talking. Show "Speaking". */
+    SPEAKING("speaking"),
+    /** The network interrupted the call and it is being made again. Show "Reconnecting…". */
+    RECONNECTING("reconnecting"),
+    /** On the call with the microphone off. Show "Muted". */
+    MUTED("muted"),
+    /** The call cannot work: [GraineVoiceInfo.error] says why. Show it, and offer to try again. */
+    FAILED("failed"),
+    /** A call ended and no other has started. */
+    ENDED("ended");
+
+    companion object {
+        /** The status a word names, in any case and with spaces around it; null for any other word. */
+        fun of(word: String?): GraineVoiceStatus? = entries.firstOrNull { it.wire == word?.trim()?.lowercase() }
+    }
+}
 
 /**
  * THE VOICE BAR'S CALL — the agent talking inside the app, beside the screen it

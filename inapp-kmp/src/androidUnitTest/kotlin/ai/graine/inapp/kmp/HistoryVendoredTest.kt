@@ -46,6 +46,7 @@ class HistoryVendoredTest {
                 },
                 restored = e.restored,
                 channel = if (e.channel == GraineChatChannel.VOICE) NativeChatTurn.Channel.VOICE else NativeChatTurn.Channel.CHAT,
+                session = e.session,
             )
             HistoryVectors.assertCarried(e, AndroidMapping.turn(native))
         }

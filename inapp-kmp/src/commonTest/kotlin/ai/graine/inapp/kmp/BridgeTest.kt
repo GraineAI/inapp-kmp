@@ -184,6 +184,7 @@ class BridgeTest {
                 caption = GraineCaption(GraineRole.AGENT, "Goodbye", false),
                 missedCall = GraineMissedCall("c0", "Asha", null, true, Instant.fromEpochMilliseconds(5000)),
                 agent = "help",
+                endReason = "remote",
             ),
             info,
         )
@@ -234,12 +235,13 @@ class BridgeTest {
         )
         assertEquals("default", Bridge.outcome("""{"callId":"c5","outcome":"ringing","hosted":true,"agent":"default"}""")?.agent)
         assertNull(Bridge.outcome("""{"callId":"c5","outcome":"ringing","agent":""}""")?.agent, "blank is not a name")
-        assertEquals(GraineVoiceInfo(connected = true, connecting = false, muted = true), Bridge.voice("""{"connected":true,"muted":true}"""))
+        assertEquals(GraineVoiceInfo(connected = true, connecting = false, muted = true, status = GraineVoiceStatus.MUTED), Bridge.voice("""{"connected":true,"muted":true}"""))
         assertTrue(Bridge.voice("""{"connected":true}""").captionsOn, "a facade from before the switch: the captions are on")
         assertEquals(
             GraineVoiceInfo(
                 connected = true, captionsOn = false,
                 captions = listOf(GraineCaption(GraineRole.USER, "What does it cost?", false), GraineCaption(GraineRole.AGENT, "It costs", true)),
+                status = GraineVoiceStatus.SPEAKING,
             ),
             Bridge.voice(
                 """{"connected":true,"captionsOn":false,"captions":[{"role":"user","text":"What does it cost?","live":false},

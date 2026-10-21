@@ -52,6 +52,10 @@ internal interface GraineEngine {
 
     /** Whether this agent can be booked from the app now: the native SDK's own rule (BOOKING-SHEET.md §1). */
     val bookingAvailable: Boolean
+    /** Why not, as a word (`not_loaded`, `rings_not_set_up`, `scheduling_off`, `not_identified`); null when it can be. */
+    val bookingUnavailableReason: String?
+    /** The times the native SDK's booking sheet offers on [isoDay] (`YYYY-MM-DD`, the phone's zone), oldest first. */
+    fun bookingSlots(isoDay: String): List<Instant>
     /** The native SDK's booking sheet: answers the booked call once it closes, or null when nothing was booked. */
     fun presentBooking(reason: String?, done: (Result<GraineScheduledCall?>) -> Unit)
 
@@ -67,6 +71,10 @@ internal interface GraineEngine {
     fun chatCancelUpcoming(id: String)
     /** Answer a component the agent drew, on the conversation that is live. */
     fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String)
+    /** Close a component the agent drew without answering it: the agent is told quietly where the platform SDK can tell it. */
+    fun dismissWidget(widgetId: String)
+    /** A chat screen of the app's own came on screen or left it: the conversation lives as the SDK's own windows' does. */
+    fun chatShown(visible: Boolean)
     /** A fresh thread: answers once it is done, or with Graine's refusal (the chat then as it was). */
     fun chatNewConversation(done: (Result<Unit>) -> Unit)
     /** Pin [pin] (already cleaned: [ChatPins]) to the chat window; null takes it away. */
@@ -88,6 +96,8 @@ internal interface GraineEngine {
     fun callsEnd()
     fun callsSetMuted(muted: Boolean)
     fun callsSetSpeaker(on: Boolean)
+    /** Calls start on the loudspeaker unless a headset is connected ([GraineCalls.speakerByDefault]). A platform without it does nothing. */
+    fun callsSetSpeakerByDefault(on: Boolean)
     fun callsCallBack(): String?
     fun callsDismissMissed()
     /** The call permissions as the phone holds them now. */
@@ -130,13 +140,18 @@ internal interface EngineSink {
 /**
  * The chat's state beside its turns (chat window v2): the replies the agent
  * suggests for its latest turn, whether it ended the conversation, the user's
- * rating of it, and the card the app pinned — as the platform SDK holds them.
+ * rating of it, the card the app pinned, and where a new conversation began
+ * under earlier lines — as the platform SDK holds them.
  */
 internal data class ChatExtras(
     val quickReplies: List<GraineQuickReply> = emptyList(),
     val ended: Boolean = false,
     val rating: GraineChatRating? = null,
     val pinned: GraineChatPin? = null,
+    /** The turns a "Disconnected · new conversation" row goes before, oldest first. */
+    val newConversationBefore: List<String> = emptyList(),
+    /** The chat's current session's id; null until Graine names it, and from a platform SDK that predates it. */
+    val sessionId: String? = null,
 )
 
 /** The platform's engine for the agent [name], over its native SDK. */

@@ -84,13 +84,61 @@ internal object ChatInference {
     /**
      * The connection's word, from flags. `reconnecting` is the platform's own:
      * a drop — or a first try that failed — being made again, as the iOS SDK
-     * says it.
+     * says it. `disconnected`: Graine ended the conversation itself (idle, or
+     * its time limit) and nothing is connecting again yet. `ended`: the agent
+     * ended the conversation — not the chat failing, so its closed connection
+     * is IDLE, as React Native and Flutter say it, whatever else is left.
      */
-    fun status(connected: Boolean, connecting: Boolean, failed: Boolean, reconnecting: Boolean): GraineChatStatus = when {
+    fun status(
+        connected: Boolean,
+        connecting: Boolean,
+        failed: Boolean,
+        reconnecting: Boolean,
+        disconnected: Boolean = false,
+        ended: Boolean = false,
+    ): GraineChatStatus = when {
         connected -> GraineChatStatus.ONLINE
         connecting -> if (reconnecting) GraineChatStatus.RECONNECTING else GraineChatStatus.CONNECTING
+        disconnected -> GraineChatStatus.DISCONNECTED
+        ended -> GraineChatStatus.IDLE
         failed -> GraineChatStatus.OFFLINE
         else -> GraineChatStatus.IDLE
+    }
+}
+
+/**
+ * THE VOICE BAR'S CALL AS ONE WORD, from what a platform reports — the bar's
+ * own order, first match wins ([GraineVoiceStatus]). [phase] is the
+ * platform's word for a live call (`reconnecting`, `thinking`, `speaking`,
+ * `listening`) when it has one; without it the captions tell: the agent's
+ * line still arriving is SPEAKING, the user's finished line with no answer
+ * begun is THINKING.
+ */
+internal object VoiceInference {
+    fun status(
+        connected: Boolean,
+        connecting: Boolean,
+        muted: Boolean,
+        failed: Boolean,
+        ended: Boolean,
+        phase: String? = null,
+        captions: List<GraineCaption> = emptyList(),
+    ): GraineVoiceStatus {
+        val word = phase?.lowercase()
+        val last = captions.lastOrNull()
+        return when {
+            failed -> GraineVoiceStatus.FAILED
+            word == "reconnecting" && (connected || connecting) -> GraineVoiceStatus.RECONNECTING
+            connecting -> GraineVoiceStatus.CONNECTING
+            !connected -> if (ended) GraineVoiceStatus.ENDED else GraineVoiceStatus.IDLE
+            muted -> GraineVoiceStatus.MUTED
+            word == "thinking" -> GraineVoiceStatus.THINKING
+            word == "speaking" -> GraineVoiceStatus.SPEAKING
+            word != null -> GraineVoiceStatus.LISTENING
+            last != null && last.role == GraineRole.AGENT && last.live -> GraineVoiceStatus.SPEAKING
+            last != null && last.role == GraineRole.USER && !last.live -> GraineVoiceStatus.THINKING
+            else -> GraineVoiceStatus.LISTENING
+        }
     }
 }
 
@@ -220,7 +268,9 @@ internal object Bridge {
             "connecting" -> GraineChatStatus.CONNECTING
             "online" -> GraineChatStatus.ONLINE
             "reconnecting" -> GraineChatStatus.RECONNECTING
-            "offline" -> GraineChatStatus.OFFLINE
+            // The agent ending the conversation is not the chat failing ([ChatInference.status]): idle, as every SDK says it.
+            "offline" -> if (o["ended"] == true) GraineChatStatus.IDLE else GraineChatStatus.OFFLINE
+            "disconnected" -> GraineChatStatus.DISCONNECTED
             else -> GraineChatStatus.IDLE
         }
         val turns = (o["turns"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { t -> turn(t) } }
@@ -230,9 +280,9 @@ internal object Bridge {
 
     /**
      * The snapshot's `quickReplies` ([{label, text}]), `ended`, `rating`
-     * ({value, scale, style} or null) and `pin` ({title, subtitle, imageUrl,
-     * badge} or null). A reply needs its label (no text: the label), a rating
-     * its numbers, a pin its title.
+     * ({value, scale, style} or null), `pin` ({title, subtitle, imageUrl,
+     * badge} or null) and `newConversationBefore` ([turn ids]). A reply needs
+     * its label (no text: the label), a rating its numbers, a pin its title.
      */
     fun chatExtras(o: Map<*, *>): ChatExtras = ChatExtras(
         quickReplies = (o["quickReplies"] as? List<*>).orEmpty().mapNotNull { r ->
@@ -250,6 +300,9 @@ internal object Bridge {
             val title = str(p["title"]) ?: return@let null
             GraineChatPin(title, str(p["subtitle"]), str(p["imageUrl"]), str(p["badge"]))
         },
+        newConversationBefore = (o["newConversationBefore"] as? List<*>).orEmpty().mapNotNull { str(it) }.distinct(),
+        // The current session: a string that is not empty, else none (an older facade says nothing).
+        sessionId = (o["sessionId"] as? String)?.takeIf { it.isNotEmpty() },
     )
 
     fun turn(o: Map<*, *>): GraineChatTurn? {
@@ -280,6 +333,8 @@ internal object Bridge {
             // Absent from an older facade: a turn said just now, in the chat. A channel other than voice is chat.
             restored = o["restored"] == true,
             channel = if (o["channel"] == GraineChatChannel.VOICE.wire) GraineChatChannel.VOICE else GraineChatChannel.CHAT,
+            // The session it was said in: a string that is not empty, else none.
+            session = (o["session"] as? String)?.takeIf { it.isNotEmpty() },
         )
     }
 
@@ -316,6 +371,12 @@ internal object Bridge {
             transportFallbackReason = str(o["transportFallbackReason"]),
             // Only a true is a recovering call: an iOS SDK that predates it says nothing.
             reconnecting = o["reconnecting"] == true,
+            reason = str(o["reason"]),
+            endReason = str(o["endReason"]).takeIf { state == GraineCallState.ENDED },
+            endCause = str(o["endCause"]).takeIf { state == GraineCallState.ENDED },
+            agentLevel = level(o["agentLevel"]),
+            startedAt = instant(o["connectedAt"]),
+            connection = (o["connection"] as? Map<*, *>)?.let { connection(it) },
         )
     }
 
@@ -323,8 +384,35 @@ internal object Bridge {
         val o = Json.obj(json) ?: return null
         val id = str(o["callId"]) ?: return null
         val kind = GraineCallOutcome.Kind.entries.firstOrNull { it.wire == (o["outcome"] as? String)?.lowercase() } ?: return null
-        return GraineCallOutcome(id, kind, str(o["reason"]), int(o["durationSeconds"]), o["hosted"] == true, str(o["agent"]))
+        return GraineCallOutcome(
+            id, kind, str(o["reason"]), int(o["durationSeconds"]), o["hosted"] == true, str(o["agent"]),
+            // iOS's facade says it as `cause`; `endCause` read too.
+            (o["connection"] as? Map<*, *>)?.let { connection(it) }, str(o["cause"]) ?: str(o["endCause"]),
+        )
     }
+
+    /**
+     * A connection report as the bridges carry it — `{transport, prepared,
+     * preparedAgeSeconds, credential, setupMs, loginMs, answerMs,
+     * firstWordsMs, tapToVoiceMs, audio: {lossPct, jitterAvgMs, jitterPeakMs,
+     * rttMs, quality}, recoveries}`; a fact absent, null or of the wrong type
+     * is not known.
+     */
+    fun connection(o: Map<*, *>): GraineCallConnection = GraineCallConnection(
+        transport = GraineCallTransport.ofCall(str(o["transport"])),
+        prepared = o["prepared"] as? Boolean,
+        preparedAgeSeconds = long(o["preparedAgeSeconds"]),
+        credential = str(o["credential"]),
+        setupMs = long(o["setupMs"]),
+        loginMs = long(o["loginMs"]),
+        answerMs = long(o["answerMs"]),
+        firstWordsMs = long(o["firstWordsMs"]),
+        tapToVoiceMs = long(o["tapToVoiceMs"]),
+        audio = (o["audio"] as? Map<*, *>)?.let { a ->
+            GraineCallConnection.Audio(double(a["lossPct"]), long(a["jitterAvgMs"]), long(a["jitterPeakMs"]), long(a["rttMs"]), str(a["quality"]))
+        },
+        recoveries = int(o["recoveries"])?.takeIf { it > 0 } ?: 0,
+    )
 
     /** `{microphone, notifications, fullScreen}` from the iOS facade; a word it does not know (or nothing) is DENIED. */
     fun permissions(json: String?): GraineCallPermissions {
@@ -357,15 +445,41 @@ internal object Bridge {
             val text = line["text"] as? String ?: return@mapNotNull null
             GraineCaption(if (line["role"] == "agent") GraineRole.AGENT else GraineRole.USER, text, line["live"] == true)
         }
+        val connected = o["connected"] == true
+        val connecting = o["connecting"] == true
+        val muted = o["muted"] == true
+        val error = str(o["error"])
+        // The facade's own word when it says one; else the bar's rule over what it does say.
+        val status = GraineVoiceStatus.of(o["status"] as? String)
+            ?: VoiceInference.status(connected, connecting, muted, failed = error != null, ended = false, captions = captions)
         return GraineVoiceInfo(
-            connected = o["connected"] == true,
-            connecting = o["connecting"] == true,
-            muted = o["muted"] == true,
+            connected = connected,
+            connecting = connecting,
+            muted = muted,
             // A facade from before the switch says nothing: the captions are on.
             captionsOn = o["captionsOn"] != false,
             captions = captions,
+            status = status,
+            error = error.takeIf { status == GraineVoiceStatus.FAILED },
+            agentLevel = level(o["agentLevel"]),
+            micLevel = level(o["micLevel"]),
+            transport = transport(str(o["transport"])),
+            transportFallbackReason = str(o["transportFallbackReason"]) ?: str(o["fallbackReason"]),
         )
     }
+
+    /** The voice bar's transport from a platform's word: `webrtc` or `rtc`, `websocket` or `ws`; null for anything else. */
+    fun transport(word: String?): GraineTransport? = when (word?.lowercase()) {
+        "webrtc", GraineTransport.WEBRTC.wire -> GraineTransport.WEBRTC
+        "websocket", GraineTransport.WEBSOCKET.wire -> GraineTransport.WEBSOCKET
+        else -> null
+    }
+
+    /** A level, 0–1: anything else (or nothing) is 0. */
+    fun level(v: Any?): Float = when (v) {
+        is Number -> v.toDouble()
+        else -> null
+    }?.takeIf { it.isFinite() }?.coerceIn(0.0, 1.0)?.toFloat() ?: 0f
 
     /** An event by its name; null for the session (reported as a state) and for any name this build does not know. */
     fun event(name: String, json: String?): GraineEvent? {
@@ -396,6 +510,19 @@ internal object Bridge {
         is Double -> if (v.isFinite()) v.toInt() else null
         else -> null
     }
+
+    /** A whole number, not negative: a figure of a connection report. */
+    private fun long(v: Any?): Long? = when (v) {
+        is Long -> v
+        is Int -> v.toLong()
+        is Double -> if (v.isFinite()) kotlin.math.round(v).toLong() else null
+        else -> null
+    }?.takeIf { it >= 0 }
+
+    private fun double(v: Any?): Double? = when (v) {
+        is Number -> v.toDouble()
+        else -> null
+    }?.takeIf { it.isFinite() && it >= 0 }
 
     private fun stringKeys(m: Map<*, *>): Map<String, Any?> = m.entries.associate { (k, v) -> k.toString() to v }
 }

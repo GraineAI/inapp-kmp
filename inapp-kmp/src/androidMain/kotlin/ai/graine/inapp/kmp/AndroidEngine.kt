@@ -1,6 +1,7 @@
 package ai.graine.inapp.kmp
 
 import ai.graine.inapp.ActionResult
+import ai.graine.inapp.ConnectStage
 import ai.graine.inapp.FrictionSignal
 import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallListener
@@ -9,8 +10,14 @@ import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineListener
 import ai.graine.inapp.Role
 import ai.graine.inapp.SessionConfig
+import ai.graine.inapp.Transport
 import android.app.Activity
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toInstant
 import org.json.JSONObject
 import java.util.Date
 
@@ -32,6 +39,8 @@ internal class AndroidEngine(
     /** The activity in front: a call and the voice bar start from it. */
     private val frontActivity: () -> Activity? = { AndroidHost.activity },
     private val wallMs: () -> Long = { System.currentTimeMillis() },
+    /** The elapsed-time clock the Android SDK times a call on (it counts deep sleep). */
+    private val elapsedMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val ringtone: (String) -> android.net.Uri? = { android.net.Uri.parse(it) },
     /** The main thread, where the Android SDK's calls and chat want to be driven. */
     private val onMain: (() -> Unit) -> Unit = { AndroidHost.onMain(it) },
@@ -48,6 +57,14 @@ internal class AndroidEngine(
     private val callAgents = HashMap<String, String>()
     private var caption: GraineCaption? = null
     private var missed: GraineMissedCall? = null
+    /** How the call that just ended ended (local, remote, failed), by id: its ENDED state says so. */
+    private var endReason: Pair<String, String>? = null
+    /** Who or what ended it (local_end, remote_bye, …), by id, likewise. */
+    private var endCause: Pair<String, String>? = null
+    /** When the call in progress connected, on the wall clock: worked out once per call, so it never moves. */
+    private var startedAt: Pair<Long, Instant>? = null
+    /** The voice bar's call ended and none has started since. Main thread. */
+    private var voiceEnded = false
 
     override val installId: String get() = port.installId
     override val memoryEnabled: Boolean get() = port.memoryEnabled
@@ -121,6 +138,14 @@ internal class AndroidEngine(
     }
 
     override val bookingAvailable: Boolean get() = port.bookingAvailable
+    override val bookingUnavailableReason: String? get() = port.bookingUnavailableReason
+
+    /** The Android SDK's own slots for the day, asked at noon of it in the phone's zone (its sheet's zone too). */
+    override fun bookingSlots(isoDay: String): List<Instant> {
+        val day = runCatching { LocalDate.parse(isoDay) }.getOrNull() ?: return emptyList()
+        val noon = LocalDateTime(day, LocalTime(12, 0)).toInstant(TimeZone.currentSystemDefault())
+        return port.bookingSlots(Date(noon.toEpochMilliseconds())).map { Instant.fromEpochMilliseconds(it.time) }
+    }
 
     /** The Android SDK's booking sheet, over the activity in front; none in front, nothing to show it over: null. */
     override fun presentBooking(reason: String?, done: (Result<GraineScheduledCall?>) -> Unit) = onMain {
@@ -145,6 +170,8 @@ internal class AndroidEngine(
     override fun chatRefreshUpcoming() = onMain { port.chatRefreshUpcoming() }
     override fun chatCancelUpcoming(id: String) = onMain { port.chatCancelUpcoming(id) }
     override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) = onMain { port.answerWidget(widgetId, data, summary) }
+    override fun dismissWidget(widgetId: String) = onMain { port.dismissWidget(widgetId) }
+    override fun chatShown(visible: Boolean) = onMain { port.chatShown(visible) }
 
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) = port.chatNewConversation { _, error ->
         if (error != null) done(Result.failure(AndroidMapping.error(error))) else done(Result.success(Unit))
@@ -157,9 +184,14 @@ internal class AndroidEngine(
     override fun chatSetAttachHandler(handler: (() -> Unit)?) = onMain { port.chatSetAttach(handler) }
 
     private fun publishChat() {
-        val status = ChatInference.status(port.chatConnected, port.chatConnecting, port.chatFailed, port.chatReconnecting)
+        val status = ChatInference.status(
+            port.chatConnected, port.chatConnecting, port.chatFailed, port.chatReconnecting, port.chatDisconnected, port.chatEnded,
+        )
         sink.chat(port.chatTurns.map { AndroidMapping.turn(it) }, status, port.chatTyping)
-        sink.chatExtras(AndroidMapping.extras(port.chatQuickReplies, port.chatEnded, port.chatRating, port.chatPinned))
+        sink.chatExtras(
+            AndroidMapping.extras(port.chatQuickReplies, port.chatEnded, port.chatRating, port.chatPinned)
+                .copy(newConversationBefore = port.chatNewConversationBefore, sessionId = port.chatSessionId),
+        )
         sink.upcomingCalls(port.chatUpcomingCalls.map { AndroidMapping.scheduledCall(it) })
     }
 
@@ -185,6 +217,7 @@ internal class AndroidEngine(
     override fun callsEnd() = port.endCall()
     override fun callsSetMuted(muted: Boolean) = port.setCallMuted(muted)
     override fun callsSetSpeaker(on: Boolean) = port.setCallSpeaker(on)
+    override fun callsSetSpeakerByDefault(on: Boolean) = port.setSpeakerByDefault(on)
 
     override fun callsCallBack(): String? = onMainSync back@{
         val activity = frontActivity() ?: return@back null
@@ -231,8 +264,26 @@ internal class AndroidEngine(
                 transport = GraineCallTransport.ofCall(port.callTransport).takeIf { c != null },
                 transportFallbackReason = port.callTransportFallbackReason.takeIf { c != null },
                 reconnecting = port.callReconnecting && c != null,
+                reason = c?.reason?.takeIf { it.isNotBlank() },
+                endReason = endReason?.takeIf { state == GraineCallState.ENDED && it.first == c?.callId }?.second,
+                endCause = endCause?.takeIf { state == GraineCallState.ENDED && it.first == c?.callId }?.second,
+                agentLevel = if (c != null) port.callAgentLevel.coerceIn(0f, 1f) else 0f,
+                startedAt = startedAtOf(port.callConnectedAt).takeIf { c != null },
+                connection = port.callConnection?.takeIf { c != null }?.let { AndroidMapping.connection(it) },
             )
         )
+    }
+
+    /** The elapsed-clock moment the call connected, on the wall clock — once per call: read again, it would move by a millisecond now and then. */
+    private fun startedAtOf(connectedAt: Long): Instant? {
+        if (connectedAt <= 0L) {
+            startedAt = null
+            return null
+        }
+        startedAt?.takeIf { it.first == connectedAt }?.let { return it.second }
+        val at = Instant.fromEpochMilliseconds(wallMs() - (elapsedMs() - connectedAt))
+        startedAt = connectedAt to at
+        return at
     }
 
     private val callListener = object : GraineCallListener {
@@ -255,12 +306,14 @@ internal class AndroidEngine(
             val call = calls[callId]
             val hosted = outcome.hosted || call?.hosted == true
             val kind = AndroidMapping.outcomeKind(outcome)
-            // The Android SDK says why (busy: another call was live), how long a call that connected lasted, and who rang it.
+            if (kind == GraineCallOutcome.Kind.ENDED) outcome.endReason?.let { endReason = callId to it.wire }
+            outcome.endCause?.let { endCause = callId to it }
+            // The Android SDK says why (busy: another call was live), how long a call that connected lasted, who rang it, and how it connected.
             sink.callOutcome(
                 outcomeOf(
                     callId, kind, outcome.endReason?.wire, outcome.error, outcome.busy, outcome.durationSeconds?.let { it * 1000L }, hosted,
                     agentOf(callId),
-                )
+                ).copy(connection = outcome.connection?.let { AndroidMapping.connection(it) }, endCause = outcome.endCause)
             )
             if (kind == GraineCallOutcome.Kind.MISSED && !outcome.busy) {
                 missed = GraineMissedCall(callId, call?.callerName, call?.reason, hosted, Instant.fromEpochMilliseconds(wallMs()))
@@ -281,6 +334,8 @@ internal class AndroidEngine(
         override fun onAgentSpeaking(speaking: Boolean) = publishCalls()
         override fun onCallControls(muted: Boolean, speaker: Boolean) = publishCalls()
         override fun onCallReconnecting(reconnecting: Boolean) = publishCalls()
+        override fun onAgentLevel(level: Float) = publishCalls()
+        override fun onCallConnection(connection: ai.graine.inapp.GraineCallConnection) = publishCalls()
     }
 
     private fun remember(call: GraineCall) {
@@ -321,17 +376,34 @@ internal class AndroidEngine(
         publishVoice()
     }
 
-    private fun publishVoice() = sink.voice(
-        GraineVoiceInfo(
-            port.voiceConnected, port.voiceConnecting, port.voiceMuted, port.voiceCaptionsOn,
-            port.voiceCaptions.map { GraineCaption(AndroidMapping.role(it.role), it.text, it.live) },
+    private fun publishVoice() {
+        val connected = port.voiceConnected
+        val connecting = port.voiceConnecting
+        if (connected || connecting) voiceEnded = false
+        // A setting someone must fix, else a start nothing could carry: the bar's "Unavailable" and "Couldn't connect".
+        val error = port.voiceError?.takeIf { it.isNotBlank() } ?: if (port.voiceCallFailed) CALL_FAILED else null
+        val captions = port.voiceCaptions.map { GraineCaption(AndroidMapping.role(it.role), it.text, it.live) }
+        val status = VoiceInference.status(connected, connecting, port.voiceMuted, error != null, voiceEnded, port.voicePhase, captions)
+        sink.voice(
+            GraineVoiceInfo(
+                connected, connecting, port.voiceMuted, port.voiceCaptionsOn, captions,
+                status = status,
+                error = error.takeIf { status == GraineVoiceStatus.FAILED },
+                transport = Bridge.transport(port.voiceTransport),
+                transportFallbackReason = port.voiceTransportFallbackReason,
+            )
         )
-    )
+    }
 
     // ── what the SDK reports ──────────────────────────────────────────────
 
     /** The tokens the Android SDK draws with now, read again on a session and on a light/dark switch. */
     private fun publishTheme() = sink.theme(ThemeBridge.parse(port.themeTokensJson))
+
+    private companion object {
+        /** The voice bar's call could not be connected on either transport: the sentence its FAILED word carries. */
+        const val CALL_FAILED = "The call could not be connected."
+    }
 
     private val listener = object : GraineListener {
         override fun onSessionReady(session: SessionConfig) {
@@ -347,9 +419,15 @@ internal class AndroidEngine(
         }
 
         override fun onEnded() {
+            voiceEnded = true
             sink.event(GraineEvent.VoiceEnded)
             publishVoice()
         }
+
+        // What the voice bar's word follows besides the call itself: its road, a connect that failed, a recovery.
+        override fun onTransport(transport: Transport, requested: Transport, reason: String?, message: String?) = publishVoice()
+        override fun onConnectProgress(stage: ConnectStage?, slow: Boolean, failed: Boolean) = publishVoice()
+        override fun onReconnecting(active: Boolean) = publishVoice()
 
         override fun onWidget(widget: JSONObject) {
             componentOf(AndroidMapping.map(widget))?.let { sink.event(GraineEvent.Component(it)) }
@@ -371,6 +449,8 @@ internal class AndroidEngine(
             // Before any session, an error is the session failing to load: a booking stops waiting for it.
             if (port.session == null) sink.sessionFailed(message)
             sink.event(GraineEvent.Error(message))
+            // A call that cannot work as configured says so in the voice bar's word.
+            publishVoice()
         }
 
         override fun onChatState(connected: Boolean, connecting: Boolean) = publishChat()

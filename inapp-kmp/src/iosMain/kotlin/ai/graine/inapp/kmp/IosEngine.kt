@@ -133,6 +133,23 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override val bookingAvailable: Boolean get() = facade.respondsToSelector(BOOKING_AVAILABLE) && facade.bookingAvailable
 
     /**
+     * The facade's `bookingUnavailableReason`, new in 0.14.0. A GraineInApp from before it has no word for
+     * why: `not_loaded` until booking is available, as before configure().
+     */
+    override val bookingUnavailableReason: String?
+        get() = when {
+            facade.respondsToSelector(BOOKING_UNAVAILABLE_REASON) -> facade.bookingUnavailableReason?.takeIf { it.isNotBlank() }
+            bookingAvailable -> null
+            else -> GraineAgent.NOT_LOADED
+        }
+
+    /** The facade's own slots (ISO-8601 times), new in 0.14.0: a GraineInApp from before it offers none here. */
+    override fun bookingSlots(isoDay: String): List<Instant> {
+        if (!facade.respondsToSelector(BOOKING_SLOTS)) return emptyList()
+        return Json.array(facade.bookingSlotsJSONForDay(isoDay)).orEmpty().mapNotNull { Bridge.instant(it) }
+    }
+
+    /**
      * The iOS SDK's booking sheet, over the key window's top view controller (the facade's
      * `presentBookingWithReason:completion:`). With a GraineInApp from before the sheet: `Unavailable`.
      */
@@ -168,6 +185,20 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
 
     override fun answerWidget(widgetId: String, data: Map<String, Any?>, summary: String) {
         if (facade.chat.respondsToSelector(ANSWER_WIDGET)) facade.chat.answerWidgetWithId(widgetId, Bridge.json(data.takeIf { it.isNotEmpty() }), summary)
+    }
+
+    /**
+     * The facade's `dismissWidgetWithId:`, new in 0.14.0: the agent is told,
+     * quietly, that the user closed the component without choosing. A
+     * GraineInApp from before it has none — the shared state still lets it go.
+     */
+    override fun dismissWidget(widgetId: String) {
+        if (facade.chat.respondsToSelector(DISMISS_WIDGET)) facade.chat.dismissWidgetWithId(widgetId)
+    }
+
+    /** The facade's `setShown:`, new in 0.14.0: a GraineInApp from before it connects on open, as it always did. */
+    override fun chatShown(visible: Boolean) {
+        if (facade.chat.respondsToSelector(SET_SHOWN)) facade.chat.setShown(visible)
     }
 
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) = facade.chat.newConversationWithCompletion { error ->
@@ -232,6 +263,11 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun callsEnd() = facade.calls.end()
     override fun callsSetMuted(muted: Boolean) = facade.calls.setMuted(muted)
     override fun callsSetSpeaker(on: Boolean) = facade.calls.setSpeaker(on)
+
+    /** The facade's `speakerByDefault`, new after 0.13.2: a GraineInApp from before it keeps its own route. */
+    override fun callsSetSpeakerByDefault(on: Boolean) {
+        if (facade.calls.respondsToSelector(SET_SPEAKER_BY_DEFAULT)) facade.calls.speakerByDefault = on
+    }
     override fun callsCallBack(): String? = facade.calls.callBack()
     override fun callsDismissMissed() = facade.calls.dismissMissedCall()
 
@@ -272,6 +308,7 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val REFRESH_UPCOMING = NSSelectorFromString("refreshUpcomingCalls")
         private val CANCEL_UPCOMING = NSSelectorFromString("cancelUpcomingCall:")
         private val ANSWER_WIDGET = NSSelectorFromString("answerWidgetWithId:dataJSON:summary:")
+        private val DISMISS_WIDGET = NSSelectorFromString("dismissWidgetWithId:")
         private val THEME_JSON = NSSelectorFromString("themeJSON")
         private val CURRENT_VARIABLES = NSSelectorFromString("currentVariablesJSON")
         private val SET_CAPTIONS_ON = NSSelectorFromString("setCaptionsOn:")
@@ -283,6 +320,11 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val RATE = NSSelectorFromString("rateWithStyle:value:")
         private val SEND_QUICK_REPLY = NSSelectorFromString("sendQuickReply:")
         private val SET_ATTACH = NSSelectorFromString("setAttachHandler:")
+        // New in the facade in 0.14.0 (asked for before each use).
+        private val SET_SHOWN = NSSelectorFromString("setShown:")
+        private val BOOKING_UNAVAILABLE_REASON = NSSelectorFromString("bookingUnavailableReason")
+        private val BOOKING_SLOTS = NSSelectorFromString("bookingSlotsJSONForDay:")
+        private val SET_SPEAKER_BY_DEFAULT = NSSelectorFromString("setSpeakerByDefault:")
         private val OLD_IOS_SDK =
             "This app links a GraineInApp without the booking sheet. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
 

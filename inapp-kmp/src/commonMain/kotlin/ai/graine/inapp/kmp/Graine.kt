@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlin.concurrent.Volatile
 
 /**
@@ -38,6 +39,9 @@ object Graine {
     internal val callInfo = MutableStateFlow(GraineCallInfo())
     internal val callOutcomes = MutableSharedFlow<GraineCallOutcome>(extraBufferCapacity = 32, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     internal val incomingCalls = MutableSharedFlow<GraineIncomingCall>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** [GraineCalls.speakerByDefault], kept here so one set before configure reaches every engine made after. */
+    @Volatile internal var speakerByDefault: Boolean = true
 
     private val lock = GraineLock()
     /** Every agent asked for, configured or not, in the order they were first named. */
@@ -84,6 +88,7 @@ object Graine {
     internal fun install(agent: GraineAgent, engine: GraineEngine) {
         if (callsReporter == null) callsReporter = agent
         agent.install(engine)
+        engine.callsSetSpeakerByDefault(speakerByDefault)
     }
 
     internal fun install(engine: GraineEngine, name: String = DEFAULT_AGENT) = install(holder(normalise(name)), engine)
@@ -127,6 +132,23 @@ object Graine {
     /** The default agent's voice bar call. */
     val voice: GraineVoice get() = defaultAgent.voice
 
+    /**
+     * The component the default agent drew that waits for an answer — in the
+     * chat or on the voice bar's call — or null when there is none. Set when
+     * one arrives; null again once it is answered ([GraineChat.answerWidget]),
+     * closed ([GraineChat.dismissWidget]) or replaced, and when its
+     * conversation is over. See [GraineAgent.component]. New in 0.14.0.
+     */
+    val component: StateFlow<GraineComponent?> get() = defaultAgent.component
+
+    /**
+     * True while a component the default agent asked for is still loading —
+     * draw a loader where it will appear. False once it arrives, its
+     * conversation is over, or after 12 seconds with nothing. See
+     * [GraineAgent.componentPending]. New in 0.14.0.
+     */
+    val componentPending: StateFlow<Boolean> get() = defaultAgent.componentPending
+
     /** What the default agent allows when a user books a call. */
     val schedulingRules: GraineSchedulingRules get() = defaultAgent.schedulingRules
 
@@ -161,6 +183,25 @@ object Graine {
     /** Whether the default agent can be booked from the app now. See [GraineAgent.bookingAvailable]. */
     val bookingAvailable: Boolean get() = defaultAgent.bookingAvailable
 
+    /**
+     * Why the default agent cannot be booked from the app now, as a word —
+     * `not_loaded`, `rings_not_set_up`, `scheduling_off` or `not_identified` —
+     * or null when it can. Read as it is now: read it again after
+     * [identify] and once [session] has a value. See
+     * [GraineAgent.bookingUnavailableReason]. New in 0.14.0.
+     */
+    val bookingUnavailableReason: String? get() = defaultAgent.bookingUnavailableReason
+
+    /**
+     * The times the SDK's booking sheet would offer on [day] in the phone's
+     * time zone — every 5 minutes within the default agent's booking rules —
+     * for a time picker of your own; book one with [scheduleCall]. Empty for a
+     * day outside the rules and before configure(). Graine checks the agent's
+     * calling hours when the time is booked. See [GraineAgent.bookingSlots].
+     * New in 0.14.0.
+     */
+    fun bookingSlots(day: LocalDate): List<Instant> = defaultAgent.bookingSlots(day)
+
     /** The SDK's own booking sheet, for the default agent. See [GraineAgent.presentBooking]. */
     suspend fun presentBooking(reason: String? = null): GraineScheduledCall? = defaultAgent.presentBooking(reason)
 
@@ -187,7 +228,17 @@ object Graine {
      * `memory = false`: this user's conversations are neither remembered nor
      * recalled; kept on this install for them. Null keeps their last choice.
      * Null traits sign out everywhere: this device stops being theirs, and later
-     * conversations are anonymous. A change applies to the next conversation.
+     * conversations are anonymous. A voice call takes who it is at its start.
+     *
+     * A chat belongs to whoever was identified when it connected (from 0.14.0).
+     * When the identity changes while the chat is connected or connecting —
+     * signing in after it opened, another user, signing out — that
+     * conversation closes quietly (never "Disconnected"), [GraineChat.turns]
+     * clears but for a message typed and not yet sent, which is sent next, and
+     * the chat connects again at once as the new identity ([GraineChat.status]
+     * CONNECTING, then ONLINE). The same identity with other traits, or another
+     * memory choice, changes nothing on the open chat. Identify before showing
+     * the chat where you can. On iOS it needs the GraineInApp of this version.
      */
     fun identify(traits: Map<String, Any?>?, memory: Boolean? = null) = primary().engine().identify(traits, memory)
 
@@ -227,6 +278,7 @@ object Graine {
         lock.locked { holders.values.forEach { it.reset() } }
         callsReporter = null
         callInfo.value = GraineCallInfo()
+        speakerByDefault = true
     }
 
     /** How long a booking waits for the agent's configuration: past the session request's own timeouts. */

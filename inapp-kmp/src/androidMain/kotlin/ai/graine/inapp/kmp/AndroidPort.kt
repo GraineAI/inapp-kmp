@@ -5,6 +5,7 @@ import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallListener
 import ai.graine.inapp.GraineCallPermission as NativeCallPermission
 import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
+import ai.graine.inapp.GraineCallConnection as NativeCallConnection
 import ai.graine.inapp.GraineCallSetupProblem as NativeCallSetupProblem
 import ai.graine.inapp.GraineCallState as NativeCallState
 import ai.graine.inapp.GraineCallStatus as NativeCallStatus
@@ -62,8 +63,14 @@ internal interface AndroidPort {
     fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>)
     fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>)
     val bookingAvailable: Boolean
+    /** Why not, as a word (GraineInApp.bookingUnavailableReason); null when it can be. */
+    val bookingUnavailableReason: String?
+    /** The booking sheet's times on the day [day] falls on (GraineInApp.bookingSlots). */
+    fun bookingSlots(day: Date): List<Date>
     /** The booking sheet over [activity]: the booked call once it closes, or null. */
     fun presentBooking(activity: Activity, reason: String?, done: GraineCallback<NativeScheduledCall?>)
+    /** Close a component without answering it (GraineInApp.dismissWidget). */
+    fun dismissWidget(widgetId: String)
 
     // The agent's chat (GraineInApp.chat).
     val chatTurns: List<NativeChatTurn>
@@ -83,7 +90,15 @@ internal interface AndroidPort {
     val chatRating: NativeChatRating?
     /** The card the app pinned. */
     val chatPinned: NativeChatPin?
+    /** Graine ended the conversation itself and nothing is connecting again yet (GraineChat.disconnected). */
+    val chatDisconnected: Boolean
+    /** The turns a "Disconnected · new conversation" row goes before (GraineChat.newConversationBefore). */
+    val chatNewConversationBefore: List<String>
+    /** The chat's current session's id (GraineChat.sessionId). */
+    val chatSessionId: String?
     fun addChatChangeListener(listener: Runnable)
+    /** A chat screen of the app's own came on screen or left it (GraineChat.shown). */
+    fun chatShown(visible: Boolean)
     /** The user is in the chat, at [size] for this open (null: the app's, then the dashboard's). */
     fun chatOpen(size: NativeChatSize?)
     fun chatConnect()
@@ -115,6 +130,12 @@ internal interface AndroidPort {
     val callTransport: String?
     /** Why the call in progress, which tried WebRTC, runs on the WebSocket; null otherwise. */
     val callTransportFallbackReason: String?
+    /** The agent's voice level, 0–1, on the call in progress (GraineCalls.agentLevel). */
+    val callAgentLevel: Float
+    /** When the call in progress connected, on the elapsed-time clock (GraineCalls.connectedAt); 0 before. */
+    val callConnectedAt: Long
+    /** How the call in progress connected so far (GraineCalls.connection). */
+    val callConnection: NativeCallConnection?
     fun addCallListener(listener: GraineCallListener)
     fun configureCalls(config: NativeCallsConfig)
     /** A call with this port's agent. */
@@ -127,6 +148,8 @@ internal interface AndroidPort {
     fun endCall()
     fun setCallMuted(muted: Boolean)
     fun setCallSpeaker(on: Boolean)
+    /** Calls start on the loudspeaker unless a headset is connected (GraineCalls.speakerByDefault). */
+    fun setSpeakerByDefault(on: Boolean)
     /** The call permissions as the phone holds them (GraineCalls.callPermissions). */
     val callPermissions: NativeCallPermissions
     /** Ask over [activity] (null: the screen in front, as the SDK finds it); [done] gets the permissions after. */
@@ -141,6 +164,15 @@ internal interface AndroidPort {
     val voiceMuted: Boolean
     val voiceCaptionsOn: Boolean
     val voiceCaptions: List<NativeCaption>
+    /** What the call is doing, in one word (GraineVoice.phase): its name. */
+    val voicePhase: String
+    /** A setting someone must fix before calls work (GraineVoice.error). */
+    val voiceError: String?
+    /** The last start could not be connected at all (GraineVoice.callFailed). */
+    val voiceCallFailed: Boolean
+    /** What the call runs on, as its wire word — "rtc" or "ws" (GraineVoice.transport); null before any call. */
+    val voiceTransport: String?
+    val voiceTransportFallbackReason: String?
     fun attachVoice(activity: Activity)
     fun startVoice()
     fun endVoice()
@@ -177,8 +209,11 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) = g.scheduledCalls(done)
     override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) = g.cancelScheduledCall(id, done)
     override val bookingAvailable: Boolean get() = g.bookingAvailable
+    override val bookingUnavailableReason: String? get() = g.bookingUnavailableReason
+    override fun bookingSlots(day: Date): List<Date> = g.bookingSlots(day)
     override fun presentBooking(activity: Activity, reason: String?, done: GraineCallback<NativeScheduledCall?>) =
         g.presentBooking(activity, reason, done)
+    override fun dismissWidget(widgetId: String) = g.dismissWidget(widgetId)
 
     override val chatTurns: List<NativeChatTurn> get() = g.chat.messages
     override val chatConnected: Boolean get() = g.chat.connected
@@ -191,7 +226,11 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val chatEnded: Boolean get() = g.chat.ended
     override val chatRating: NativeChatRating? get() = g.chat.rating
     override val chatPinned: NativeChatPin? get() = g.chat.pinned
+    override val chatDisconnected: Boolean get() = g.chat.disconnected
+    override val chatNewConversationBefore: List<String> get() = g.chat.newConversationBefore
+    override val chatSessionId: String? get() = g.chat.sessionId
     override fun addChatChangeListener(listener: Runnable) = g.chat.addChangeListener(listener)
+    override fun chatShown(visible: Boolean) = g.chat.shown(visible)
     override fun chatOpen(size: NativeChatSize?) = g.chat.open(size)
     override fun chatConnect() = g.chat.connect()
     override fun chatClear() = g.chat.clear()
@@ -215,6 +254,9 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val callAgentName: String? get() = g.calls.callAgent?.name
     override val callTransport: String? get() = g.calls.transport
     override val callTransportFallbackReason: String? get() = g.calls.transportFallbackReason
+    override val callAgentLevel: Float get() = g.calls.agentLevel
+    override val callConnectedAt: Long get() = g.calls.connectedAt
+    override val callConnection: NativeCallConnection? get() = g.calls.connection
     override fun addCallListener(listener: GraineCallListener) = g.calls.addListener(listener)
     override fun configureCalls(config: NativeCallsConfig) = g.calls.configure(config)
     override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? =
@@ -226,6 +268,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun endCall() = g.calls.end()
     override fun setCallMuted(muted: Boolean) = g.calls.setMuted(muted)
     override fun setCallSpeaker(on: Boolean) = g.calls.setSpeaker(on)
+    override fun setSpeakerByDefault(on: Boolean) { g.calls.speakerByDefault = on }
     override val callPermissions: NativeCallPermissions get() = g.calls.callPermissions
     override fun requestCallPermissions(activity: Activity?, done: (NativeCallPermissions) -> Unit) =
         g.calls.requestCallPermissions(activity) { done(it) }
@@ -237,6 +280,11 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val voiceMuted: Boolean get() = g.voice.muted
     override val voiceCaptionsOn: Boolean get() = g.voice.captionsOn
     override val voiceCaptions: List<NativeCaption> get() = g.voice.captions
+    override val voicePhase: String get() = g.voice.phase.name
+    override val voiceError: String? get() = g.voice.error
+    override val voiceCallFailed: Boolean get() = g.voice.callFailed
+    override val voiceTransport: String? get() = g.voice.transport?.wire
+    override val voiceTransportFallbackReason: String? get() = g.voice.transportFallbackReason
     override fun attachVoice(activity: Activity) = g.voice.attach(activity)
     override fun startVoice() = g.voice.start()
     override fun endVoice() = g.voice.end()

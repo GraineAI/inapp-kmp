@@ -3,7 +3,9 @@ package ai.graine.inapp.kmp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -16,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlin.concurrent.Volatile
 
 /**
@@ -60,8 +63,16 @@ class GraineAgent internal constructor(
     internal val chatEnded = MutableStateFlow(false)
     internal val chatRating = MutableStateFlow<GraineChatRating?>(null)
     internal val chatPinned = MutableStateFlow<GraineChatPin?>(null)
+    internal val chatNewConversationBefore = MutableStateFlow<List<String>>(emptyList())
+    internal val chatSessionId = MutableStateFlow<String?>(null)
+    internal val chatSessions = MutableStateFlow<List<GraineChatSession>>(emptyList())
     internal val voiceInfo = MutableStateFlow(GraineVoiceInfo())
     internal val themeState = MutableStateFlow<GraineThemeTokens?>(null)
+    internal val componentState = MutableStateFlow<GraineComponent?>(null)
+    internal val componentPendingState = MutableStateFlow(false)
+    /** Lets a loader that has stood too long go, as the SDK's renderer does. */
+    @Volatile
+    private var pendingExpiry: Job? = null
 
     /** The app's [GraineChat.onRated]. */
     @Volatile
@@ -91,6 +102,23 @@ class GraineAgent internal constructor(
 
     /** Everything this agent reports that is not a state. Not replayed. */
     val events: SharedFlow<GraineEvent> = eventFlow.asSharedFlow()
+
+    /**
+     * THE COMPONENT ON SCREEN — the one the agent drew that waits for an
+     * answer, in the chat or on the voice bar's call, as the SDK's renderer
+     * holds it: its `id`, `kind`, `data` and `fallbackText`. Null once it is
+     * answered (`chat.answerWidget`), closed (`chat.dismissWidget`), replaced
+     * by the next, or its conversation is over — and before any. For a UI of
+     * your own; [GraineEvent.Component] reports each one as it comes.
+     */
+    val component: StateFlow<GraineComponent?> = componentState.asStateFlow()
+
+    /**
+     * The agent asked for a component and its content is loading — draw a
+     * loader where it will appear. False once it arrives, its conversation is
+     * over, or after 12 seconds with nothing, as the SDK's renderer gives up.
+     */
+    val componentPending: StateFlow<Boolean> = componentPendingState.asStateFlow()
 
     /** The typed conversation with this agent. */
     val chat: GraineChat = GraineChat(this)
@@ -207,6 +235,33 @@ class GraineAgent internal constructor(
     val bookingAvailable: Boolean get() = current?.bookingAvailable ?: false
 
     /**
+     * Why this agent cannot be booked from the app now — the first part of
+     * [bookingAvailable]'s rule that fails, as a word: `not_loaded` (its
+     * settings have not loaded yet, or before configure()), `rings_not_set_up`
+     * (Graine does not ring this phone), `scheduling_off` (the agent does not
+     * let users book), `not_identified` (nobody is identified with the trait
+     * the agent's Identity setting names). Null when it can be booked. On iOS
+     * it needs the GraineInApp of this version (an older one answers
+     * `not_loaded` until booking is available).
+     */
+    val bookingUnavailableReason: String?
+        get() {
+            val engine = current ?: return NOT_LOADED
+            return engine.bookingUnavailableReason
+        }
+
+    /**
+     * The times the SDK's booking sheet would offer on [day], in the phone's
+     * time zone — every 5 minutes from the soonest the agent's rules allow
+     * ([GraineSchedulingRules.earliest], rounded up) to the latest, oldest
+     * first — for a picker of your own; book one with [scheduleCall]. Empty
+     * for a day outside the rules, and before configure(). Graine still checks
+     * what only it knows (the calling hours, the calls already booked) when
+     * the time is booked. On iOS it needs the GraineInApp of this version.
+     */
+    fun bookingSlots(day: LocalDate): List<Instant> = current?.bookingSlots(day.toString()) ?: emptyList()
+
+    /**
      * Show the SDK's own booking sheet, drawn by the native SDK in this
      * agent's design: the day, the time, the phone's time zone, "What's it
      * about? (optional)" — which [reason] fills — and Book call. Returns the
@@ -225,6 +280,39 @@ class GraineAgent internal constructor(
 
     /** A fresh thread in this agent's chat ([GraineChat.newConversation]). */
     internal suspend fun newConversation(): Unit = await { e, done -> e.chatNewConversation(done) }
+
+    /** The component [id] was answered or closed: it is no longer on screen. */
+    internal fun componentDone(id: String) {
+        if (componentState.value?.id == id) componentState.value = null
+    }
+
+    /** The component state as the conversation moves: one arrives, one is on its way, the conversation is over. */
+    private fun componentHeard(event: GraineEvent) {
+        when (event) {
+            is GraineEvent.Component -> {
+                pendingExpiry?.cancel()
+                componentPendingState.value = false
+                componentState.value = event.component
+            }
+            is GraineEvent.ComponentPending -> {
+                componentPendingState.value = true
+                pendingExpiry?.cancel()
+                pendingExpiry = Graine.actionScope.launch {
+                    delay(PENDING_COMPONENT_MS)
+                    componentPendingState.value = false
+                }
+            }
+            GraineEvent.VoiceEnded -> componentGone()
+            else -> Unit
+        }
+    }
+
+    /** Nothing from the conversation that ended can be answered: no component, no loader. */
+    private fun componentGone() {
+        pendingExpiry?.cancel()
+        componentPendingState.value = false
+        componentState.value = null
+    }
 
     /** The user calls this agent: `Graine.calls.startCall(reason, variables, agent = name)`. */
     fun startCall(reason: String? = null, variables: Map<String, Any?> = emptyMap()): String? =
@@ -267,13 +355,17 @@ class GraineAgent internal constructor(
         }
 
         override fun event(event: GraineEvent) {
+            componentHeard(event)
             eventFlow.tryEmit(event)
         }
 
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) {
+            // A chat that connects again is a new conversation on the server: a component from the last cannot be answered.
+            if (status == GraineChatStatus.ONLINE && chatStatus.value != GraineChatStatus.ONLINE) componentGone()
             chatTurns.value = turns
             chatStatus.value = status
             chatTyping.value = typing
+            chatSessions.value = ChatSessions.of(turns, chatSessionId.value)
         }
 
         override fun chatExtras(extras: ChatExtras) {
@@ -282,6 +374,11 @@ class GraineAgent internal constructor(
             chatEnded.value = extras.ended
             chatRating.value = extras.rating
             chatPinned.value = extras.pinned
+            chatNewConversationBefore.value = extras.newConversationBefore
+            if (chatSessionId.value != extras.sessionId) {
+                chatSessionId.value = extras.sessionId
+                chatSessions.value = ChatSessions.of(chatTurns.value, extras.sessionId)
+            }
             // A rating given — in the chat window or through rate() — is heard once; the platform repeats its state.
             val rated = extras.rating
             if (rated != null && rated != before) ratedHandler?.let { runCatching { it(rated) } }
@@ -319,10 +416,21 @@ class GraineAgent internal constructor(
         chatEnded.value = false
         chatRating.value = null
         chatPinned.value = null
+        chatNewConversationBefore.value = emptyList()
+        chatSessionId.value = null
+        chatSessions.value = emptyList()
         ratedHandler = null
         attachHandler = null
         voiceInfo.value = GraineVoiceInfo()
         themeState.value = null
+        componentGone()
+    }
+
+    internal companion object {
+        /** [bookingUnavailableReason] before the agent's settings are known. */
+        const val NOT_LOADED = "not_loaded"
+        /** How long a component's loader may stand with nothing arriving — the SDK's renderer's 12 seconds. */
+        const val PENDING_COMPONENT_MS = 12_000L
     }
 }
 

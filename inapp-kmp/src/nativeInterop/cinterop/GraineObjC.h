@@ -35,6 +35,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)retry;
 - (void)clear;
 - (void)answerWidgetWithId:(NSString *)widgetId dataJSON:(nullable NSString *)dataJSON summary:(NSString *)summary;
+- (void)dismissWidgetWithId:(NSString *)widgetId;
 - (void)refreshUpcomingCalls;
 - (void)cancelUpcomingCall:(NSString *)callId;
 - (void)sendQuickReply:(GraineObjCQuickReply *)reply;
@@ -42,12 +43,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)pinWithTitle:(NSString *)title subtitle:(nullable NSString *)subtitle imageUrl:(nullable NSString *)imageUrl badge:(nullable NSString *)badge;
 - (void)clearPin;
 - (void)setAttachHandler:(void (^ _Nullable)(void))handler;
+- (void)setShown:(BOOL)visible;
 - (GraineObjCRegistration *)observe:(void (^)(void))observer;
 @end
 
 @interface GraineObjCCalls : NSObject
 @property (nonatomic, readonly) NSString *snapshotJSON;
 @property (nonatomic, copy) NSString *callTransport;
+@property (nonatomic) BOOL speakerByDefault;
 @property (nonatomic, readonly, nullable) NSString *transport;
 @property (nonatomic, readonly, nullable) NSString *transportFallbackReason;
 - (void)configureWithDisplayName:(NSString *)displayName ringtoneSound:(nullable NSString *)ringtoneSound ringTimeout:(double)ringTimeout includesCallsInRecents:(BOOL)includesCallsInRecents;
@@ -98,6 +101,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) GraineObjCCalls *calls;
 @property (nonatomic, readonly) GraineObjCVoice *voice;
 @property (nonatomic, readonly) BOOL bookingAvailable;
+@property (nonatomic, readonly, nullable) NSString *bookingUnavailableReason;
 
 - (void)identifyJSON:(nullable NSString *)traitsJSON;
 - (void)identifyJSON:(nullable NSString *)traitsJSON memory:(BOOL)memory;
@@ -117,6 +121,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)scheduledCallsJSONWithCompletion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (void)cancelScheduledCall:(NSString *)callId completion:(void (^)(NSString * _Nullable status, NSError * _Nullable error))completion;
 - (void)presentBookingWithReason:(nullable NSString *)reason completion:(void (^)(GraineObjCScheduledCall * _Nullable call))completion;
+- (NSString *)bookingSlotsJSONForDay:(NSString *)isoDay;
 - (GraineObjCRegistration *)observeEvents:(void (^)(NSString *name, NSString *json))observer;
 - (NSObject *)chatViewControllerWithOnClose:(void (^ _Nullable)(void))onClose;
 - (NSObject *)callViewController;

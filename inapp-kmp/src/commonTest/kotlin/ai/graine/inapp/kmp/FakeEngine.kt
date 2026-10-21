@@ -83,6 +83,10 @@ internal class FakeEngine : GraineEngine {
     override fun cancelScheduledCall(id: String, done: (Result<GraineCallStatus>) -> Unit) { calls += "cancel:$id"; cancelAnswer?.let(done) }
 
     override var bookingAvailable: Boolean = false
+    override var bookingUnavailableReason: String? = "scheduling_off"
+    /** What the booking sheet offers on any day asked for. */
+    var slots: List<Instant> = emptyList()
+    override fun bookingSlots(isoDay: String): List<Instant> { calls += "bookingSlots:$isoDay"; return slots }
     /** What the booking sheet answers once it closes; null leaves it open. */
     var bookingAnswer: Result<GraineScheduledCall?>? = Result.success(null)
     val presented = mutableListOf<String?>()
@@ -104,6 +108,8 @@ internal class FakeEngine : GraineEngine {
         answers += Triple(widgetId, data, summary)
         calls += "answerWidget:$widgetId"
     }
+    override fun dismissWidget(widgetId: String) { calls += "dismissWidget:$widgetId" }
+    override fun chatShown(visible: Boolean) { calls += "chatShown:$visible" }
     override fun chatNewConversation(done: (Result<Unit>) -> Unit) { calls += "newConversation"; newConversationAnswer?.let(done) }
     /** Every pin handed over, as the platform got it. */
     val pins = mutableListOf<GraineChatPin?>()
@@ -123,6 +129,9 @@ internal class FakeEngine : GraineEngine {
     override fun callsEnd() { calls += "end" }
     override fun callsSetMuted(muted: Boolean) { calls += "callMuted:$muted" }
     override fun callsSetSpeaker(on: Boolean) { calls += "speaker:$on" }
+    /** What the platform was told of GraineCalls.speakerByDefault, in order. */
+    val speakerDefaults = mutableListOf<Boolean>()
+    override fun callsSetSpeakerByDefault(on: Boolean) { speakerDefaults += on }
     override fun callsCallBack(): String? { calls += "callBack"; return "call_2" }
     override fun callsDismissMissed() { calls += "dismissMissed" }
 

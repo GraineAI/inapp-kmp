@@ -42,6 +42,21 @@ data class GraineCallOutcome(
      * (`"default"` for the default agent); null when the platform does not know.
      */
     val agent: String? = null,
+    /**
+     * How the call connected, as it stood when it ended — on ENDED and
+     * FAILED; null otherwise (and from a platform SDK that predates it).
+     */
+    val connection: GraineCallConnection? = null,
+    /**
+     * Who or what ended the call, on ENDED and FAILED: `local_end` (this app or
+     * the user hung up), `remote_bye` (the agent's side hung up), `media_drop`
+     * (the audio path dropped and did not recover), `audio_watch` (the SDK's
+     * own watch ended it — on Android nothing arrived for too long, on iOS the
+     * call's audio never started), `failed` (anything else), and on iOS
+     * `provider_reset` (the system reset CallKit). Null otherwise, and from a
+     * platform SDK that predates it.
+     */
+    val endCause: String? = null,
 ) {
     enum class Kind(val wire: String) {
         RINGING("ringing"), ANSWERED("answered"), DECLINED("declined"), MISSED("missed"), FAILED("failed"), ENDED("ended"),
@@ -136,9 +151,80 @@ data class GraineCallInfo(
      * the audio is back, and always false from a platform SDK that predates it.
      */
     val reconnecting: Boolean = false,
+    /** Why the call is happening — the ring's reason, or `startCall`'s — when it has one. Null with no call. */
+    val reason: String? = null,
+    /** How the call ended, while it is ENDED: `local` (this app hung up), `remote` (the agent did) or `failed`. Null otherwise. */
+    val endReason: String? = null,
+    /** Who or what ended it, while it is ENDED — [GraineCallOutcome.endCause]'s word. Null otherwise. */
+    val endCause: String? = null,
+    /**
+     * The agent's voice level, 0–1, as it is heard — what the call screen's
+     * visualiser follows: about five times a second over WebRTC, ten over the
+     * WebSocket while the agent's audio plays. 0 with no call. On iOS it needs
+     * the GraineInApp of this version.
+     */
+    val agentLevel: Float = 0f,
+    /** When the call connected; the call screen's duration counts from it. Null before (and with no call). */
+    val startedAt: Instant? = null,
+    /**
+     * HOW THE CALL IS CONNECTING — the same facts as its Connection in
+     * Execution Logs, growing as the call goes ([GraineCallConnection]). Null
+     * with no call, before its first fact, and from a platform SDK that
+     * predates it; its outcome carries the last of it.
+     */
+    val connection: GraineCallConnection? = null,
 ) {
     /** A call screen has something to show: a call, or a missed ring to call back. */
     val showsCallScreen: Boolean get() = state != GraineCallState.IDLE || missedCall != null
+}
+
+/**
+ * HOW A CALL CONNECTED — the same facts as the call's Connection in Execution
+ * Logs, live while the call goes ([GraineCallInfo.connection]) and final on
+ * its outcome ([GraineCallOutcome.connection]). Each fact is null until it is
+ * known (a call carried over the WebSocket has no audio figures). Timings and
+ * network figures only — nothing personal.
+ *
+ * The tap's wait, in order: [setupMs], [loginMs], [answerMs], [firstWordsMs];
+ * [tapToVoiceMs] is all of it, as the user felt it.
+ */
+data class GraineCallConnection(
+    /** What carried the call: WEBRTC or WEBSOCKET. */
+    val transport: GraineCallTransport? = null,
+    /** Prepared before the tap ([GraineCalls.prepareCall], or a ring's, ready by its answer); false: set up after the tap. */
+    val prepared: Boolean? = null,
+    /** How long before the tap a prepared call was ready, in seconds. */
+    val preparedAgeSeconds: Long? = null,
+    /** Where the call's credential came from: `direct` (issued directly, WebRTC) or `web` (issued through the web). */
+    val credential: String? = null,
+    /** From the tap to the call being placed — without the login, on a call set up after the tap. */
+    val setupMs: Long? = null,
+    /** The device signing in to the call server, inside the setup (a prepared call logged in before the tap: null). */
+    val loginMs: Long? = null,
+    /** From the call being placed to it being answered. */
+    val answerMs: Long? = null,
+    /** From the answer to the agent's voice reaching the phone. */
+    val firstWordsMs: Long? = null,
+    /** From the tap to the agent's voice: the wait the user felt. */
+    val tapToVoiceMs: Long? = null,
+    /** The audio — the readings so far while the call is live, the call's own at its end. WebRTC only. */
+    val audio: Audio? = null,
+    /** How many times the connection recovered on its own. */
+    val recoveries: Int = 0,
+) {
+    /** The audio as the phone measured it. */
+    data class Audio(
+        /** Packets lost of all the far side sent, in percent (two decimals): 0.28 is 0.28 %. */
+        val lossPct: Double? = null,
+        /** How unevenly the agent's audio arrived, on average, in milliseconds; under 30 is good. */
+        val jitterAvgMs: Long? = null,
+        /** The worst jitter measured, in milliseconds. */
+        val jitterPeakMs: Long? = null,
+        /** The network's round trip, on average, in milliseconds; under 150 is good. */
+        val rttMs: Long? = null,
+        /** In a word: `good`, `fair` or `poor` — Execution Logs' verdict on the loss, jitter and round trip. */
+        val quality: String? = null,
+    )
 }
 
 /** A permission a native call needs. [wire] is the word every Graine SDK uses. */
@@ -217,6 +303,17 @@ data class GraineCallsConfig(
     val includeInRecents: Boolean = false,
     /** How calls carry their audio: [GraineCallTransport.AUTO] (WebRTC when the app includes it), WEBSOCKET or WEBRTC. */
     val callTransport: GraineCallTransport = GraineCallTransport.AUTO,
+    /**
+     * Android: your app's own call screen — the full class name of an Activity
+     * of your app ("com.acme.app.CallActivity"), declared in its manifest. The
+     * SDK opens it instead of its own for a ring, a call placed or answered,
+     * and a missed call; it draws from [GraineCalls.state], calls the same
+     * functions as the SDK's screen, and forwards its permission answers to
+     * `Graine.onRequestPermissionsResult`. Null, or a name that is not an
+     * Activity of your app (a warning in the log): the SDK's call screen.
+     * Ignored on iOS, where your screen draws over CallKit's. New in 0.14.0.
+     */
+    val androidCallActivity: String? = null,
 )
 
 /**
@@ -308,6 +405,21 @@ class GraineCalls internal constructor() {
 
     /** Hang up — or, while it rings, decline. */
     fun end() = Graine.callsEngine().callsEnd()
+
+    /**
+     * Calls start on the loudspeaker — an agent's voice is heard with the phone
+     * in the hand, not at the ear — unless a headset is connected (on iOS also
+     * a car or AirPlay), which takes the call; [setSpeaker] still moves it.
+     * False: the earpiece first, as before 0.14.0. Set it before a call; may be
+     * set before [Graine.configure]. On iOS it needs the GraineInApp of this
+     * version (an older one keeps its own route).
+     */
+    var speakerByDefault: Boolean
+        get() = Graine.speakerByDefault
+        set(value) {
+            Graine.speakerByDefault = value
+            Graine.agents.values.forEach { it.engineOrNull()?.callsSetSpeakerByDefault(value) }
+        }
 
     /** Stop sending the user's voice without ending the call. */
     fun setMuted(muted: Boolean) = Graine.callsEngine().callsSetMuted(muted)

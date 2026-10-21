@@ -26,6 +26,9 @@ internal object HistoryVectors {
         val restored: Boolean,
         /** The user's turns only. */
         val delivery: GraineDelivery?,
+        /** The session it was said in, as the platform SDK keeps it; compared only where the case names one. */
+        val session: String? = null,
+        val namesSession: Boolean = false,
     )
 
     @Suppress("UNCHECKED_CAST")
@@ -61,6 +64,8 @@ internal object HistoryVectors {
                 "failed" -> GraineDelivery.FAILED
                 else -> GraineDelivery.SENT
             },
+            session = t["session"] as? String,
+            namesSession = t.containsKey("session"),
         )
     }
 
@@ -78,6 +83,7 @@ internal object HistoryVectors {
         "proactive" to false,
         "restored" to e.restored,
         "channel" to e.channel.wire,
+        "session" to e.session,
     )
 
     /** The shared turn says everything the contract says of [e]; a restored one is delivered, not live, not volunteered. */
@@ -90,6 +96,7 @@ internal object HistoryVectors {
         assertEquals(e.channel, t.channel, "$where: channel")
         assertEquals(e.restored, t.restored, "$where: restored")
         assertEquals(e.delivery, t.delivery, "$where: delivery")
+        if (e.namesSession) assertEquals(e.session, t.session, "$where: session")
         if (e.restored) assertTrue(!t.live && !t.proactive, "$where: a restored turn is delivered, not live, not volunteered")
     }
 }

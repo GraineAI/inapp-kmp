@@ -3,6 +3,7 @@ package ai.graine.inapp.kmp
 import ai.graine.inapp.ActionResult
 import ai.graine.inapp.FrictionSignal
 import ai.graine.inapp.GraineCall
+import ai.graine.inapp.GraineCallConnection as NativeCallConnection
 import ai.graine.inapp.GraineCallListener
 import ai.graine.inapp.GraineCallPermission as NativeCallPermission
 import ai.graine.inapp.GraineCallPermissionStatus as NativeStatus
@@ -36,6 +37,9 @@ import ai.graine.inapp.SessionIdentity
 import ai.graine.inapp.Transport
 import android.app.Activity
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -124,6 +128,11 @@ class AndroidEngineTest {
         override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) { listDone = done }
         override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) { did += "cancel:$id"; cancelDone = done }
         override var bookingAvailable = false
+        override var bookingUnavailableReason: String? = "not_identified"
+        var slotsAskedFor: Date? = null
+        var slotsNow: List<Date> = emptyList()
+        override fun bookingSlots(day: Date): List<Date> { slotsAskedFor = day; return slotsNow }
+        override fun dismissWidget(widgetId: String) { did += "dismissWidget:$widgetId" }
         var bookingFrom: Activity? = null
         var bookingReason: String? = null
         var bookingDone: GraineCallback<NativeScheduledCall?>? = null
@@ -142,7 +151,11 @@ class AndroidEngineTest {
         override var chatEnded = false
         override var chatRating: NativeChatRating? = null
         override var chatPinned: NativeChatPin? = null
+        override var chatDisconnected = false
+        override var chatNewConversationBefore: List<String> = emptyList()
+        override var chatSessionId: String? = null
         override fun addChatChangeListener(listener: Runnable) { chatListeners += listener }
+        override fun chatShown(visible: Boolean) { did += "chatShown:$visible" }
         override fun chatOpen(size: NativeChatSize?) { did += "chatOpen:$size" }
         override fun chatConnect() { did += "chatConnect" }
         override fun chatClear() { did += "chatClear" }
@@ -173,6 +186,9 @@ class AndroidEngineTest {
         override var callAgentName: String? = null
         override var callTransport: String? = null
         override var callTransportFallbackReason: String? = null
+        override var callAgentLevel = 0f
+        override var callConnectedAt = 0L
+        override var callConnection: NativeCallConnection? = null
         override fun addCallListener(listener: GraineCallListener) { callListeners += listener }
         override fun configureCalls(config: NativeCallsConfig) { callsConfig = config }
         override fun startCall(activity: Activity, reason: String?, variables: Map<String, Any?>): String? {
@@ -185,6 +201,7 @@ class AndroidEngineTest {
         override fun endCall() { did += "endCall" }
         override fun setCallMuted(muted: Boolean) { did += "callMuted:$muted" }
         override fun setCallSpeaker(on: Boolean) { did += "speaker:$on" }
+        override fun setSpeakerByDefault(on: Boolean) { did += "speakerByDefault:$on" }
         var permissionsNow = NativeCallPermissions(NativeStatus.DENIED, NativeStatus.DENIED, NativeStatus.BLOCKED)
         var permissionsAfterAsking: NativeCallPermissions? = null
         var askedFrom: Activity? = null
@@ -214,6 +231,11 @@ class AndroidEngineTest {
         var captionsOnNow = true
         override val voiceCaptionsOn: Boolean get() = captionsOnNow
         override var voiceCaptions: List<NativeCaption> = emptyList()
+        override var voicePhase = "IDLE"
+        override var voiceError: String? = null
+        override var voiceCallFailed = false
+        override var voiceTransport: String? = null
+        override var voiceTransportFallbackReason: String? = null
         override fun setVoiceCaptionsOn(on: Boolean) { captionsOnNow = on; did += "captionsOn:$on" }
         override fun clearVoiceCaptions() { voiceCaptions = emptyList(); did += "clearCaptions" }
     }
@@ -223,6 +245,7 @@ class AndroidEngineTest {
     private lateinit var engine: AndroidEngine
     private var front: Activity? = null
     private var appearanceChanged: (() -> Unit)? = null
+    private var elapsedNow = 90_000L
 
     @Before
     fun setUp() {
@@ -234,6 +257,7 @@ class AndroidEngineTest {
             appName = { "Graine Demo" },
             frontActivity = { front },
             wallMs = { 1_760_000_000_000L },
+            elapsedMs = { elapsedNow },
             ringtone = { null },
             onMain = { it() },
             onMainSync = { it() },
@@ -991,4 +1015,231 @@ class AndroidEngineTest {
         port.callSetupProblems = listOf(NativeCallSetupProblem("full_screen_not_allowed", "Offer the setting."))
         assertEquals(listOf(GraineCallSetupProblem("full_screen_not_allowed", "Offer the setting.")), engine.callsSetupProblems())
     }
+
+    // ── public state for screens of your own (0.14.0) ─────────────────────
+
+    @Test
+    fun theChatSaysDisconnectedAndWhereANewConversationBegan() {
+        start()
+        port.chatDisconnected = true
+        port.chatNewConversationBefore = listOf("t3")
+        port.chatChanged()
+        assertEquals(GraineChatStatus.DISCONNECTED, heard.chat!!.second)
+        assertEquals(listOf("t3"), heard.extras!!.newConversationBefore)
+        // Opening it again connects: the Android SDK is connecting, and says so first.
+        port.chatConnecting = true
+        port.chatChanged()
+        assertEquals(GraineChatStatus.CONNECTING, heard.chat!!.second)
+        engine.chatShown(true)
+        engine.chatShown(false)
+        assertEquals(listOf("chatShown:true", "chatShown:false"), port.did)
+    }
+
+    @Test
+    fun theVoiceBarsWordComesFromTheSdksPhaseAndItsFaults() {
+        start()
+        val l = port.listeners.single()
+        port.voiceConnecting = true; port.voicePhase = "CONNECTING"
+        l.onCallState(false, true)
+        assertEquals(GraineVoiceStatus.CONNECTING, heard.voice!!.status)
+        port.voiceConnecting = false; port.voiceConnected = true; port.voicePhase = "SPEAKING"
+        port.voiceTransport = "ws"; port.voiceTransportFallbackReason = "no_answer"
+        l.onTransport(Transport.WEBSOCKET, Transport.WEBRTC, "no_answer", null)
+        assertEquals(GraineVoiceStatus.SPEAKING, heard.voice!!.status)
+        assertEquals(GraineTransport.WEBSOCKET, heard.voice!!.transport)
+        assertEquals("no_answer", heard.voice!!.transportFallbackReason)
+        assertEquals("the Android SDK's voice bar reports no levels", 0f, heard.voice!!.agentLevel)
+        engine.voiceSetMuted(true)
+        assertEquals(GraineVoiceStatus.MUTED, heard.voice!!.status)
+        engine.voiceSetMuted(false)
+        port.voicePhase = "THINKING"
+        l.onCaption(Role.CUSTOMER, "How much is it?", false)
+        assertEquals(GraineVoiceStatus.THINKING, heard.voice!!.status)
+        port.voiceConnected = false; port.voicePhase = "IDLE"
+        l.onEnded()
+        assertEquals(GraineVoiceStatus.ENDED, heard.voice!!.status)
+        // A start nothing could carry, then a setting someone must fix: each a sentence.
+        port.voiceCallFailed = true
+        l.onConnectProgress(null, false, true)
+        assertEquals(GraineVoiceStatus.FAILED, heard.voice!!.status)
+        assertEquals("The call could not be connected.", heard.voice!!.error)
+        port.voiceCallFailed = false; port.voiceError = "This agent is not set up for calls."
+        l.onError("This agent is not set up for calls.")
+        assertEquals(GraineVoiceStatus.FAILED, heard.voice!!.status)
+        assertEquals("This agent is not set up for calls.", heard.voice!!.error)
+        // The next call: nothing of the last one's end is left.
+        port.voiceError = null; port.voiceConnecting = true; port.voicePhase = "CONNECTING"
+        l.onCallState(false, true)
+        assertEquals(GraineVoiceStatus.CONNECTING, heard.voice!!.status)
+        assertNull(heard.voice!!.error)
+        port.voiceConnecting = false; port.voicePhase = "IDLE"
+        l.onCallState(false, false)
+        assertEquals(GraineVoiceStatus.IDLE, heard.voice!!.status)
+    }
+
+    @Test
+    fun theCallScreensStateCarriesTheReasonTheLevelTheStartAndTheConnection() {
+        start()
+        val c = GraineCall("c1", GraineCall.Direction.OUTGOING, "Asha", "kyc_help", emptyMap())
+        val l = port.callListeners.single()
+        port.callState = NativeCallState.ACTIVE; port.call = c
+        port.callConnectedAt = 80_000L
+        l.onCallState(NativeCallState.ACTIVE, c)
+        assertEquals("kyc_help", heard.calls!!.reason)
+        assertEquals("ten seconds before now, on the wall clock", Instant.fromEpochMilliseconds(1_760_000_000_000L - 10_000L), heard.calls!!.startedAt)
+        elapsedNow = 95_000L
+        port.callAgentLevel = 0.6f
+        l.onAgentLevel(0.6f)
+        assertEquals(0.6f, heard.calls!!.agentLevel)
+        assertEquals("worked out once per call: it never moves", Instant.fromEpochMilliseconds(1_760_000_000_000L - 10_000L), heard.calls!!.startedAt)
+        val report = NativeCallConnection(
+            transport = "webrtc", prepared = true, preparedAgeSeconds = 75, credential = "direct", setupMs = 12, answerMs = 410,
+            firstWordsMs = 880, tapToVoiceMs = 1302, audio = NativeCallConnection.Audio(0.28, 12, 40, 95, "good"), recoveries = 1,
+        )
+        val shared = GraineCallConnection(
+            transport = GraineCallTransport.WEBRTC, prepared = true, preparedAgeSeconds = 75, credential = "direct", setupMs = 12, answerMs = 410,
+            firstWordsMs = 880, tapToVoiceMs = 1302, audio = GraineCallConnection.Audio(0.28, 12, 40, 95, "good"), recoveries = 1,
+        )
+        port.callConnection = report
+        l.onCallConnection(report)
+        assertEquals(shared, heard.calls!!.connection)
+        // The end: who ended it, and how it connected, on the outcome.
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ENDED, NativeOutcome.EndReason.LOCAL, callId = "c1", durationSeconds = 30, connection = report))
+        assertEquals(shared, heard.outcomes.last().connection)
+        port.callState = NativeCallState.ENDED
+        l.onCallState(NativeCallState.ENDED, c)
+        assertEquals("local", heard.calls!!.endReason)
+        port.callState = NativeCallState.IDLE; port.call = null; port.callConnectedAt = 0L; port.callAgentLevel = 0f
+        l.onCallState(NativeCallState.IDLE, null)
+        val idle = heard.calls!!
+        assertNull(idle.reason)
+        assertNull(idle.endReason)
+        assertNull(idle.startedAt)
+        assertNull(idle.connection)
+        assertEquals(0f, idle.agentLevel)
+    }
+
+    @Test
+    fun whyBookingIsUnavailableAndItsSlotsAreTheAndroidSdks() {
+        start()
+        assertEquals("not_identified", engine.bookingUnavailableReason)
+        port.slotsNow = listOf(Date(1_761_100_200_000L), Date(1_761_100_500_000L))
+        assertEquals(port.slotsNow.map { Instant.fromEpochMilliseconds(it.time) }, engine.bookingSlots("2026-10-22"))
+        // Asked at noon of that day, in the phone's zone — the zone the Android SDK's sheet offers it in.
+        val asked = Instant.fromEpochMilliseconds(port.slotsAskedFor!!.time).toLocalDateTime(TimeZone.currentSystemDefault())
+        assertEquals(LocalDate(2026, 10, 22), asked.date)
+        assertEquals(12, asked.hour)
+        assertTrue("not a day", engine.bookingSlots("tomorrow").isEmpty())
+    }
+
+    /**
+     * Who a chat belongs to: the Android SDK closes the connection the identity
+     * changed under and connects again as the new one. The shared flows follow
+     * it — the earlier turns gone, a line not yet sent kept, "connecting" (never
+     * a reconnect or a failure), and nothing of the last conversation left.
+     */
+    @Test
+    fun theFlowsFollowTheChatConnectingAgainForTheNewIdentity() {
+        start()
+        port.chatConnected = true
+        port.chatTurns = listOf(
+            NativeChatTurn("t1", Role.AGENT, "Hi! How can I help?", Date(1_000)),
+            NativeChatTurn("t2", Role.CUSTOMER, "Where is my order?", Date(2_000), NativeChatTurn.Delivery.SENDING),
+        )
+        port.chatNewConversationBefore = listOf("t1")
+        port.chatChanged()
+        assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
+        engine.identify(mapOf("user_id" to "u-1"), null)
+        assertTrue(port.did.contains("identify:{user_id=u-1}:null"))
+        // What the Android SDK does with it: the connection closed and made again, the user's line kept.
+        port.chatConnected = false; port.chatConnecting = true
+        port.chatTurns = listOf(NativeChatTurn("t2", Role.CUSTOMER, "Where is my order?", Date(2_000), NativeChatTurn.Delivery.SENDING))
+        port.chatNewConversationBefore = emptyList()
+        port.chatChanged()
+        assertEquals("connecting, not reconnecting nor offline", GraineChatStatus.CONNECTING, heard.chat!!.second)
+        assertEquals(listOf("Where is my order?"), heard.chat!!.first.map { it.text })
+        assertEquals(GraineDelivery.SENDING, heard.chat!!.first.single().delivery)
+        assertTrue("no marker row left over", heard.extras!!.newConversationBefore.isEmpty())
+        port.chatConnecting = false; port.chatConnected = true
+        port.chatChanged()
+        assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
+    }
+
+    @Test
+    fun theSessionsAreTheAndroidSdksTurnsAndSessionId() {
+        start()
+        port.chatConnected = true
+        port.chatTurns = listOf(
+            NativeChatTurn("b1", Role.CUSTOMER, "Hi", Date(1_000), restored = true, session = "s-7a1c"),
+            NativeChatTurn("t1", Role.CUSTOMER, "Back again", Date(5_000), session = "s-9f2c"),
+            NativeChatTurn("t2", Role.AGENT, "Welcome back.", Date(6_000), session = "s-9f2c"),
+        )
+        port.chatSessionId = "s-9f2c"
+        port.chatChanged()
+        assertEquals(listOf("s-7a1c", "s-9f2c", "s-9f2c"), heard.chat!!.first.map { it.session })
+        assertEquals("s-9f2c", heard.extras!!.sessionId)
+    }
+
+    @Test
+    fun whoEndedACallAndTheLoudspeakerByDefaultAreTheAndroidSdks() {
+        start()
+        val c = GraineCall("c1", GraineCall.Direction.OUTGOING, "Asha", "kyc_help", emptyMap())
+        val l = port.callListeners.single()
+        port.callState = NativeCallState.ACTIVE; port.call = c
+        l.onCallState(NativeCallState.ACTIVE, c)
+        l.onCallOutcome("c1", NativeOutcome(NativeOutcome.Kind.ENDED, NativeOutcome.EndReason.FAILED, callId = "c1", endCause = "media_drop"))
+        assertEquals("media_drop", heard.outcomes.last().endCause)
+        port.callState = NativeCallState.ENDED
+        l.onCallState(NativeCallState.ENDED, c)
+        assertEquals("media_drop", heard.calls!!.endCause)
+        port.callState = NativeCallState.IDLE; port.call = null
+        l.onCallState(NativeCallState.IDLE, null)
+        assertNull(heard.calls!!.endCause)
+        engine.callsSetSpeakerByDefault(false)
+        assertEquals(listOf("speakerByDefault:false"), port.did)
+    }
+
+    @Test
+    fun aChatTheAgentEndedIsIdleOnceItsConnectionClosesNeverOffline() {
+        start()
+        port.chatConnected = true
+        port.chatEnded = true
+        port.chatChanged()
+        assertEquals("held open a moment for the rating", GraineChatStatus.ONLINE, heard.chat!!.second)
+        // The server lets it go: the Android SDK does not reconnect, and it is not a failure.
+        port.chatConnected = false
+        port.chatChanged()
+        assertEquals(GraineChatStatus.IDLE, heard.chat!!.second)
+        assertTrue(heard.extras!!.ended)
+        port.chatFailed = true
+        port.chatChanged()
+        assertEquals("the agent's goodbye outranks a stale failure", GraineChatStatus.IDLE, heard.chat!!.second)
+        // The user writes again: the conversation goes on, and connects.
+        port.chatEnded = false; port.chatFailed = false; port.chatConnecting = true
+        port.chatChanged()
+        assertEquals(GraineChatStatus.CONNECTING, heard.chat!!.second)
+    }
+
+    @Test
+    fun theAppsOwnCallScreenIsNamedByItsActivitysClassName() {
+        start()
+        engine.callsConfigure(GraineCallsConfig(androidCallActivity = OwnCallScreen::class.java.name))
+        assertEquals("the app's own screen opens for calls", OwnCallScreen::class.java, port.callsConfig!!.callActivity)
+        engine.callsConfigure(GraineCallsConfig(androidCallActivity = "  ${OwnCallScreen::class.java.name}  "))
+        assertEquals(OwnCallScreen::class.java, port.callsConfig!!.callActivity)
+        for (name in listOf("com.acme.NoSuchScreen", "java.lang.String", " ", null)) {
+            engine.callsConfigure(GraineCallsConfig(androidCallActivity = name))
+            assertNull("$name: the SDK's call screen", port.callsConfig!!.callActivity)
+        }
+    }
+
+    @Test
+    fun aComponentClosedFromTheAppsOwnUiIsClosedByTheAndroidSdk() {
+        start()
+        engine.dismissWidget("w1")
+        assertEquals(listOf("dismissWidget:w1"), port.did)
+    }
 }
+
+/** An app's own call screen, as an app declares one. */
+class OwnCallScreen : Activity()

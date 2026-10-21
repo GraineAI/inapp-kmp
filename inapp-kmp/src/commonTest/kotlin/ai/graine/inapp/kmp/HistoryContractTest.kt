@@ -49,6 +49,50 @@ class HistoryContractTest {
         }
     }
 
+    /**
+     * `sessionFrame`: the platform SDK reads the frame; the shared state reads
+     * the platform's session id by the same rule — a string that is not empty,
+     * else none — as the iOS facade hands it over.
+     */
+    @Test
+    fun theSessionIdIsReadAsTheSessionFrameSays() {
+        for (c in HistoryVectors.section("sessionFrame")) {
+            val frame = c["frame"] as Map<*, *>
+            val snapshot = mapOf("turns" to emptyList<Any>(), "status" to "online", "sessionId" to frame["id"])
+            assertEquals(c["sessionId"] as String?, Bridge.chat(Json.write(snapshot)).extras.sessionId, c["name"] as String)
+        }
+    }
+
+    @Test
+    fun theSessionsAreDerivedAsTheContractSays() {
+        for (c in HistoryVectors.section("sessions")) {
+            val name = c["name"] as String
+            val turns = (c["turns"] as List<*>).mapIndexed { i, raw ->
+                val t = raw as Map<*, *>
+                GraineChatTurn(
+                    id = "s$i",
+                    role = if (t["role"] == "customer") GraineRole.USER else GraineRole.AGENT,
+                    text = t["text"] as String,
+                    at = Instant.parse(t["at"] as String),
+                    channel = if (t["channel"] == "voice") GraineChatChannel.VOICE else GraineChatChannel.CHAT,
+                    session = t["session"] as String?,
+                )
+            }
+            val want = (c["sessions"] as List<*>).map { raw ->
+                val e = raw as Map<*, *>
+                GraineChatSession(
+                    id = e["id"] as String?,
+                    startedAt = Instant.parse(e["startedAt"] as String),
+                    endedAt = Instant.parse(e["endedAt"] as String),
+                    channel = if (e["channel"] == "voice") GraineChatChannel.VOICE else GraineChatChannel.CHAT,
+                    turns = (e["turns"] as Long).toInt(),
+                    current = e["current"] as Boolean,
+                )
+            }
+            assertEquals(want, ChatSessions.of(turns, c["sessionId"] as String?), name)
+        }
+    }
+
     /** The contract's row in one word: `turn:0`, `voice:1-3`, `day:today` / `day:yesterday` / `day:2026-10-12`. */
     private fun contractRow(r: Map<*, *>): String = when {
         "turn" in r -> "turn:${r["turn"]}"
@@ -65,6 +109,7 @@ class HistoryContractTest {
             GraineChatDay.YESTERDAY -> "yesterday"
             GraineChatDay.DATE -> r.date.toString()
         }
+        is GraineChatRow.NewConversation -> "fresh:${r.index}"
     }
 
     // ── what a chat window says, and offers ───────────────────────────────

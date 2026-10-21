@@ -1,3 +1,17 @@
+## 0.14.0
+
+- **The chat keeps its conversation.** Through the Android SDK 0.14.0 and, in the iOS app, `GraineInApp` 0.14.0, `GraineChat()` (and `GraineViews.chat()` on iOS) no longer ends the conversation when it leaves the screen: it stays connected until it has been idle for 5 minutes, so the chat opened again continues it, with no new welcome. When Graine ends an idle conversation the header reads *Disconnected* until the user opens the chat or writes again, and when a conversation cannot continue a line — *Disconnected · new conversation* — replaces a stacked second welcome. `Graine.chat.turns` is unchanged. Nothing to change in your app.
+- **Every screen, drawn your own way.** Every state the SDK's own screens read is now public on both platforms, so your app can draw its own screens with no Graine-drawn view:
+  - chat: `GraineChatStatus.DISCONNECTED`, `Graine.chat.newConversationBefore`, `Graine.chat.shown(visible)` (a chat screen of your own says when it shows, so the conversation lives as the SDK's own window's does), and `GraineChatRow.NewConversation` from `GraineChatRows.build(turns, newConversationBefore, …)`;
+  - voice: `GraineVoiceInfo.status` (`GraineVoiceStatus`), `error`, `transport`, `transportFallbackReason`, `agentLevel` and `micLevel` (on iOS; 0 on Android for now);
+  - calls: `GraineCallInfo.connection` (`GraineCallConnection`, the Connection card of Execution Logs, live and final), `reason`, `endReason`, `endCause`, `agentLevel` and `startedAt`, and `connection` on `GraineCallOutcome`;
+  - booking: `Graine.bookingUnavailableReason` and `Graine.bookingSlots(day)` (also on `GraineAgent`);
+  - components: `Graine.component` and `Graine.componentPending` (also on `GraineAgent`), `GraineComponent.data` and `fallbackText`, and `Graine.chat.dismissWidget(id)`.
+  If your code matches `GraineChatStatus` or `GraineChatRow` exhaustively, add the new cases.
+- **Calls start on the loudspeaker** unless a headset is connected; `Graine.calls.speakerByDefault = false` (set before configure) starts them on the earpiece on Android.
+- **A call connects sooner on a slow network.** A call no longer waits on the background readiness check before it dials; the request that sets the call up gives up after 1.5 seconds and takes Graine's web route instead; and the 12-second dial budget starts once that request has answered, so a slow setup no longer eats the time a call has to connect.
+- **Why a call ended:** `GraineCallInfo.endCause` and `GraineCallOutcome`'s cause (`local_end`, `remote_bye`, `media_drop`, `audio_watch`, `failed`).
+
 ## 0.13.1
 
 - **A WebRTC call no longer redials while the agent is picking up.** On a slow connection the half-second wait for the agent to answer could start before the server had the call, so a call about to be answered was cancelled and dialled again: a longer *Connecting…*, and at times the agent's greeting captioned twice and an extra, empty call in the call history. The wait now starts once the server confirms it has the call, and a dial that must be made again is always ended on the server first, so each call is answered by one agent. Nothing to change in your app. Through the Android SDK 0.13.1 and, in the iOS app, `GraineInApp` and `GraineInAppRTC` 0.13.1.

@@ -1,6 +1,7 @@
 package ai.graine.inapp.kmp
 
 import ai.graine.inapp.ActionResult
+import ai.graine.inapp.GraineCallConnection as NativeCallConnection
 import ai.graine.inapp.GraineCallOutcome as NativeOutcome
 import ai.graine.inapp.GraineCallPermission as NativeCallPermission
 import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
@@ -146,6 +147,7 @@ internal object AndroidMapping {
             live = t.live,
             restored = t.restored,
             channel = if (t.channel == NativeChatTurn.Channel.VOICE) GraineChatChannel.VOICE else GraineChatChannel.CHAT,
+            session = t.session,
         )
     }
 
@@ -178,6 +180,21 @@ internal object AndroidMapping {
 
     fun role(r: Role): GraineRole = if (r == Role.AGENT) GraineRole.AGENT else GraineRole.USER
 
+    /** The Android SDK's connection report, fact for fact: the same facts, the transport by its word. */
+    fun connection(c: NativeCallConnection): GraineCallConnection = GraineCallConnection(
+        transport = GraineCallTransport.ofCall(c.transport),
+        prepared = c.prepared,
+        preparedAgeSeconds = c.preparedAgeSeconds,
+        credential = c.credential,
+        setupMs = c.setupMs,
+        loginMs = c.loginMs,
+        answerMs = c.answerMs,
+        firstWordsMs = c.firstWordsMs,
+        tapToVoiceMs = c.tapToVoiceMs,
+        audio = c.audio?.let { GraineCallConnection.Audio(it.lossPct, it.jitterAvgMs, it.jitterPeakMs, it.rttMs, it.quality) },
+        recoveries = c.recoveries,
+    )
+
     fun callState(s: NativeCallState): GraineCallState = GraineCallState.valueOf(s.name)
 
     fun outcomeKind(o: NativeOutcome): GraineCallOutcome.Kind = GraineCallOutcome.Kind.valueOf(o.kind.name)
@@ -204,7 +221,23 @@ internal object AndroidMapping {
         ringtone = c.ringtone?.takeIf { it.isNotBlank() }?.let(ringtone),
         ringTimeoutMs = c.ringTimeoutSeconds.coerceIn(5, 300) * 1000L,
         callTransport = NativeCallTransport.valueOf(c.callTransport.name),
+        callActivity = callActivity(c.androidCallActivity),
     )
+
+    /**
+     * The app's own call screen, by its class name ([GraineCallsConfig.androidCallActivity]):
+     * an Activity of the app's, else null — the SDK's call screen, and a warning in the log.
+     */
+    @Suppress("UNCHECKED_CAST")
+    fun callActivity(name: String?): Class<out android.app.Activity>? {
+        val n = name?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val c = runCatching { Class.forName(n, false, AndroidMapping::class.java.classLoader) }.getOrNull()
+        if (c == null || !android.app.Activity::class.java.isAssignableFrom(c)) {
+            runCatching { android.util.Log.w("GraineInApp", "androidCallActivity \"$n\" is not an Activity of this app: the SDK's call screen is used.") }
+            return null
+        }
+        return c as Class<out android.app.Activity>
+    }
 
     /** A JSON value from the Android SDK (org.json) as plain Kotlin values, for anything not read through [args]. */
     fun plain(v: Any?): Any? = when (v) {

@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.13.1")
-            implementation("ai.graine:inapp-kmp-compose:0.13.1")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.14.0")
+            implementation("ai.graine:inapp-kmp-compose:0.14.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -75,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.13.1`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.14.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.13.1'`
-  (or `pod 'GraineInApp', '~> 0.13.1'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.13.1"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.14.0'`
+  (or `pod 'GraineInApp', '~> 0.14.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.14.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 `Info.plist`, because your app is the one asking for the microphone, and for
@@ -107,8 +107,8 @@ and the Android SDK of the same version beside it as `android` — the Android
 side builds on it. From your project's root:
 
 ```bash
-git clone --branch 0.13.1 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.13.1 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.14.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.14.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -213,10 +213,11 @@ Or draw your own from `Graine.chat`: `open()` when the user is in the chat,
 (`GraineChatTurn`: role, text, when, `delivery` for the user's messages,
 `proactive` for the agent's, `live` while words arrive, `restored` and
 `channel` for an earlier conversation's), `status` (idle, connecting, online,
-reconnecting, offline), `typing` and `upcomingCalls` (the user's booked calls,
+reconnecting, offline, disconnected), `typing` and `upcomingCalls` (the user's booked calls,
 as the SDK's window shows them: `refreshUpcomingCalls()`, `cancelUpcomingCall(id)`).
 A component the agent drew (`GraineEvent.Component`) that you draw yourself is
-answered with `answerWidget(id, data, summary)`.
+answered with `answerWidget(id, data, summary)`. [Draw your own screens](#draw-your-own-screens)
+shows each piece.
 
 `GraineChat()` draws the chat style chosen in the dashboard (Chat window →
 Style): Classic, the chat as it has always looked, or Soft, Bold, Glass,
@@ -296,8 +297,9 @@ Box(Modifier.fillMaxSize()) {
 ```
 
 The bar places and ends the call itself; `Graine.voice` (`start()`, `end()`,
-`setMuted()`, `setCaptionsOn()`, `clearCaptions()`, and `state` — with `captions` and
-the CC switch `captionsOn`) is there for your own controls.
+`setMuted()`, `setCaptionsOn()`, `clearCaptions()`, and `state` — with `status`,
+`captions`, the CC switch `captionsOn`, the voice levels and the transport) is
+there for your own controls ([Draw your own screens](#draw-your-own-screens)).
 
 ## The brand's design, for UI of your own
 
@@ -471,6 +473,238 @@ trait the agent's Identity setting names. The native chat windows
 (`GraineChat()`, `GraineViews.chat()`) show **Book a call** in their Upcoming
 calls card by the same rule.
 
+## Draw your own screens
+
+Every state the SDK's own chat, voice bar, call screen, booking sheet and
+components draw from is public, and every control they offer is a call you
+can make — so a screen of your own behaves exactly like the SDK's. Each state
+is a `StateFlow`: collect it, and your screen follows. The examples are
+Compose; `DayLine`, `Bubble`, `LevelMeter` and the like stand for your own
+composables. New in 0.14.0 unless noted.
+
+### Chat
+
+```kotlin
+@Composable
+fun SupportChat() {
+    val turns by Graine.chat.turns.collectAsState()
+    val status by Graine.chat.status.collectAsState()
+    val freshBefore by Graine.chat.newConversationBefore.collectAsState()
+
+    // Say when your screen comes and goes: the chat connects while it shows,
+    // and stays connected for 5 quiet minutes after, as the SDK's own does.
+    DisposableEffect(Unit) {
+        Graine.chat.shown(true)
+        onDispose { Graine.chat.shown(false) }
+    }
+
+    Column {
+        Text(when (status) {
+            GraineChatStatus.ONLINE -> "Online"
+            GraineChatStatus.CONNECTING -> "Connecting…"
+            GraineChatStatus.RECONNECTING -> "Reconnecting…"
+            GraineChatStatus.DISCONNECTED -> "Disconnected"           // ended after a quiet spell; a message reconnects
+            GraineChatStatus.OFFLINE -> "Offline · tap to retry"       // every retry spent: Graine.chat.retry()
+            GraineChatStatus.IDLE -> ""                                // also after the agent ended the conversation
+        })
+        LazyColumn {
+            items(GraineChatRows.build(turns, freshBefore), key = { it.key }) { row ->
+                when (row) {
+                    is GraineChatRow.Day -> DayLine(GraineChatRows.dayLabel(row))
+                    is GraineChatRow.NewConversation -> DayLine(row.label, spoken = row.spoken)
+                    is GraineChatRow.VoiceCall -> CallRow(row.at)       // "Voice call · 6:05 PM": GraineChatRows.callLabel
+                    is GraineChatRow.Turn -> Bubble(row.turn)
+                }
+            }
+        }
+        Composer(onSend = { text -> Graine.chat.send(text) })
+    }
+}
+```
+
+Each chat connection is a session, and so is each call: `turn.session` is the
+id of the one a message was said in (the id Execution Logs shows), and
+`Graine.chat.sessionId` the current one. **Sessions**, for a "Past
+conversations" list of your own:
+
+```kotlin
+@Composable
+fun PastConversations() {
+    val sessions by Graine.chat.sessions.collectAsState()
+    LazyColumn {
+        items(sessions.reversed()) { s ->                     // newest first
+            ListItem(
+                headlineContent = { Text(if (s.channel == GraineChatChannel.VOICE) "Call" else "Chat") },
+                supportingContent = { Text("${s.turns} messages · ${s.startedAt}") },
+                trailingContent = { if (s.current) Text("Now") },
+            )
+        }
+    }
+}
+```
+
+Messages kept before sessions were recorded make one session with no id; with
+a server that does not name sessions yet, the whole conversation is one session
+with no id and `sessionId` is null.
+
+`DISCONNECTED` means Graine ended the conversation itself after it had been
+idle for 5 minutes, or at the session's time limit: the lines stay, and the
+user's next message (or opening the chat again) connects again. When a new
+conversation begins under earlier lines, `newConversationBefore` names the
+message a "Disconnected · new conversation" row goes before;
+`GraineChatRows.build` places it. When the agent ends the conversation,
+`ended` is true and `status` is `IDLE` once its connection closes — never
+`OFFLINE`, which only means every reconnect failed. A chat belongs to whoever
+was identified when it connected: identify before showing the chat where you
+can — if the identity changes while it is connected, the conversation closes
+quietly, `turns` clears (a message typed and not yet sent stays, and goes
+next), and the chat connects again as the new identity.
+
+### Talk (the voice bar's call)
+
+```kotlin
+@Composable
+fun TalkButton() {
+    val talk by Graine.voice.state.collectAsState()
+    val live = talk.connected || talk.connecting
+    Column {
+        Text(when (talk.status) {
+            GraineVoiceStatus.IDLE, GraineVoiceStatus.ENDED -> "Tap to talk"
+            GraineVoiceStatus.CONNECTING -> "Connecting…"
+            GraineVoiceStatus.LISTENING -> "Listening"
+            GraineVoiceStatus.THINKING -> "Thinking…"
+            GraineVoiceStatus.SPEAKING -> "Speaking"
+            GraineVoiceStatus.MUTED -> "Muted"
+            GraineVoiceStatus.RECONNECTING -> "Reconnecting…"
+            GraineVoiceStatus.FAILED -> talk.error ?: "Couldn't connect"
+        })
+        LevelMeter(talk.agentLevel)                          // 0–1, about five times a second
+        talk.captions.lastOrNull()?.let { Text(it.text) }    // the line being said
+        Button(onClick = { if (live) Graine.voice.end() else Graine.voice.start() }) {
+            Text(if (live) "End" else "Talk")
+        }
+    }
+}
+```
+
+`agentLevel` and `micLevel` come from iOS for now; on Android the voice bar's
+call reports no levels yet, so they stay 0 there. `transport` says what the
+call runs on (WebRTC or WebSocket) and `transportFallbackReason` why it is not
+WebRTC, for your logs.
+
+### Calls
+
+On Android, name your own call screen so the SDK opens it — for a ring, a call
+placed or answered, and a missed call — instead of its own: an Activity of your
+app, declared in its manifest, that shows `CallScreen()` below and forwards its
+permission answers to `Graine.onRequestPermissionsResult`. iOS ignores it: there
+your screen draws over CallKit's.
+
+```kotlin
+Graine.calls.configure(GraineCallsConfig(displayName = "Acme Assistant", androidCallActivity = "com.acme.app.CallActivity"))
+```
+
+```kotlin
+@Composable
+fun CallScreen() {
+    val call by Graine.calls.state.collectAsState()
+    when (call.state) {
+        GraineCallState.RINGING -> Ringing(call.callerName, onAnswer = { Graine.calls.answer() }, onDecline = { Graine.calls.decline() })
+        GraineCallState.CONNECTING, GraineCallState.ACTIVE -> Column {
+            Text(call.callerName ?: "Assistant")
+            Visualiser(call.agentLevel)                       // 0–1, as the agent is heard
+            CallTimer(call.startedAt)                         // null until the call connects
+            call.connection?.let { ConnectionCard(it) }
+            Row {
+                Toggle("Mute", call.muted) { Graine.calls.setMuted(it) }
+                Toggle("Speaker", call.speakerOn) { Graine.calls.setSpeaker(it) }
+                Button(onClick = { Graine.calls.end() }) { Text("End") }
+            }
+        }
+        GraineCallState.ENDED -> Text(if (call.endCause == "remote_bye") "The agent ended the call" else "Call ended")
+        GraineCallState.IDLE -> Unit
+    }
+}
+
+@Composable
+fun ConnectionCard(c: GraineCallConnection) = Column {
+    Text(if (c.transport == GraineCallTransport.WEBRTC) "Connected over WebRTC" else "Connected over WebSocket")
+    c.tapToVoiceMs?.let { Text("The agent spoke ${it / 1000.0} s after the tap") }
+    c.audio?.let { Text("Audio ${it.quality ?: "—"} · ${it.lossPct ?: 0.0}% lost · ${it.rttMs ?: "—"} ms round trip") }
+    if (c.recoveries > 0) Text("Recovered ${c.recoveries} times on its own")
+}
+```
+
+`connection` is the same report as the call's Connection in Execution Logs,
+growing as the call goes: the transport and the wait from the tap (setup,
+login, answer, first words) once it connects, the audio while it is live.
+Each outcome carries the last of it, with `endCause` — who or what ended the
+call (`local_end`, `remote_bye`, `media_drop`, `audio_watch`, `failed`; on iOS
+also `provider_reset`):
+
+```kotlin
+scope.launch {
+    Graine.calls.outcomes.collect { o -> analytics.log(o.callId, o.outcome.wire, o.endCause, o.connection?.tapToVoiceMs) }
+}
+```
+
+Calls start on the loudspeaker unless a headset is connected; set
+`Graine.calls.speakerByDefault = false` before a call for the earpiece first.
+`setSpeaker` still moves the call in progress.
+
+### Booking
+
+```kotlin
+when (val why = Graine.bookingUnavailableReason) {
+    null -> {
+        val tomorrow = Clock.System.todayIn(TimeZone.currentSystemDefault()).plus(1, DateTimeUnit.DAY)
+        TimePicker(Graine.bookingSlots(tomorrow)) { at ->            // every 5 minutes the agent's rules allow
+            scope.launch {
+                try {
+                    Graine.scheduleCall(at, reason = "Talk through my order")
+                } catch (e: GraineException) {
+                    showError(e.message)                               // e.g. outside the hours calls can ring
+                }
+            }
+        }
+    }
+    "not_identified" -> Text("Sign in to book a call")
+    else -> Unit                                                       // not_loaded, rings_not_set_up, scheduling_off
+}
+```
+
+`bookingUnavailableReason` is the first part of `bookingAvailable`'s rule
+that fails; read it again after `identify` and once `Graine.session` has a
+value. `bookingSlots(day)` are the booking sheet's own times. Graine checks
+the agent's calling hours when the time is booked (`OutsideWindow`).
+
+### Components
+
+```kotlin
+@Composable
+fun AgentComponent() {
+    val component by Graine.component.collectAsState()
+    val loading by Graine.componentPending.collectAsState()
+    val c = component
+    when {
+        c != null -> Column {
+            when (c.kind) {
+                "choices" -> Choices(c.data) { value, label -> Graine.chat.answerWidget(c.id, mapOf("choice" to value), summary = label) }
+                else -> Text(c.fallbackText ?: c.title.orEmpty())     // a kind you do not draw
+            }
+            TextButton(onClick = { Graine.chat.dismissWidget(c.id) }) { Text("Close") }
+        }
+        loading -> CircularProgressIndicator()
+    }
+}
+```
+
+`component` is the one the agent drew that waits for an answer, in the chat
+or on the voice bar's call; it goes back to null when it is answered, closed
+or replaced, and when its conversation ends. `componentPending` is true while
+one is loading, for at most 12 seconds. `dismissWidget` also tells the agent,
+quietly, that the user closed it without choosing.
+
 ## Errors
 
 Every refusal is a `GraineException`: `code` (`InvalidKey`, `OriginRefused`,
@@ -520,8 +754,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.13.1 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.13.1 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.14.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.14.0 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>
