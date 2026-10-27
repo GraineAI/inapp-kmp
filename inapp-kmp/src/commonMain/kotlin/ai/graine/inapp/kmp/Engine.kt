@@ -23,8 +23,23 @@ internal interface GraineEngine {
     /** Start reporting to [sink]: the session, events, the chat, calls and the voice bar. Called once. */
     fun start(sink: EngineSink)
 
-    fun identify(traits: Map<String, Any?>?, memory: Boolean?)
+    /** Who is signed in, and the identity token that proves it (null: none given — the same user keeps theirs). */
+    fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?)
     fun setMemory(enabled: Boolean)
+
+    // Your app and your users (0.14.4): the platform SDK sends the declaration, proves the app and carries the token.
+    /** Replace the identity token for the user identified now, without changing who it is; null clears it. */
+    fun setIdentityToken(token: String?)
+    /** The app's refresher in callback form ([IdentityTokens.bridge]): answered once, with a token or null (keep the one held). Null removes it. */
+    fun setIdentityTokenRefresher(refresher: ((done: (String?) -> Unit) -> Unit)?)
+    /** Prove the app now, for this agent: [done] hears the verdict, once. */
+    fun prepareAppVerification(done: (GraineAppVerdict) -> Unit)
+    /** What Graine has proven for this agent, as the platform SDK holds it now. */
+    val verification: GraineVerification
+    /** Development mode, as the platform SDK holds it. */
+    var debugTokenMode: GraineDebugTokenMode
+    /** This install's debug token while the build uses one, else null. */
+    val debugToken: String?
     fun forgetMemory(done: (Result<Int>) -> Unit)
     fun memories(done: (Result<List<GraineMemory>>) -> Unit)
     fun setVariables(values: Map<String, Any?>?)
@@ -36,6 +51,8 @@ internal interface GraineEngine {
     fun removeField(name: String)
     fun clearScreen(screenId: String?)
     fun track(name: String, data: Map<String, Any?>)
+    /** Something worth speaking up about, on the live chat or call: the platform SDK's `reportEvent`. */
+    fun reportEvent(name: String, detail: String?, data: Map<String, Any?>)
     fun tap(name: String)
     fun noteInteraction()
 
@@ -47,6 +64,8 @@ internal interface GraineEngine {
     fun registerAction(name: String, handler: (args: Map<String, Any?>, answer: (GraineActionResult) -> Unit) -> Unit): () -> Unit
 
     fun scheduleCall(at: Instant, reason: String?, done: (Result<GraineScheduledCall>) -> Unit)
+    /** The platform SDK's `startWorkflow` (0.14.4): its checks, its key and its one retry are the platform's. */
+    fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: (Result<GraineWorkflowRun>) -> Unit)
     fun scheduledCalls(done: (Result<List<GraineScheduledCall>>) -> Unit)
     fun cancelScheduledCall(id: String, done: (Result<GraineCallStatus>) -> Unit)
 
@@ -149,6 +168,8 @@ internal interface EngineSink {
     fun voice(info: GraineVoiceInfo)
     /** The brand's design tokens for the device's appearance now; null before the session and without a design. */
     fun theme(tokens: GraineThemeTokens?)
+    /** What Graine has proven for this agent changed. A platform SDK without it never reports: off and off stand. */
+    fun verification(verification: GraineVerification) {}
 }
 
 /**

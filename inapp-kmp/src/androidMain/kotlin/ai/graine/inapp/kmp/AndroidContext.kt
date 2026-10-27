@@ -15,6 +15,7 @@ import android.os.Looper
 import java.lang.ref.WeakReference
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * The application, and the activity in front — what the Android SDK needs and
@@ -71,15 +72,42 @@ internal object AndroidHost {
 
     /**
      * [block] on the main thread, and its answer here. From the main thread it
-     * just runs; from another it waits for its turn (at most two seconds — the
-     * main thread is never waited on longer than that).
+     * just runs; from another it waits for its turn — at most two seconds: a
+     * block the main thread has not begun by then never runs, and the answer
+     * is null ([MainSync]).
      */
     fun <T> onMainSync(block: () -> T): T? {
         if (Looper.myLooper() == Looper.getMainLooper()) return block()
+        return MainSync.run({ main.post(it) }, MAIN_SYNC_WAIT_MS, block)
+    }
+
+    /** The longest a caller off the main thread waits for it. */
+    private const val MAIN_SYNC_WAIT_MS = 2_000L
+}
+
+/**
+ * [AndroidHost.onMainSync]'s wait, on any [post]: the tests' as well as the
+ * main thread's. A block the main thread has not begun when the wait is over
+ * never runs — its caller was answered null, so nothing it asked for may
+ * happen behind its back (a call placed after startCall said none was); one it
+ * has begun is waited for to its end.
+ */
+internal object MainSync {
+    private const val PENDING = 0
+    private const val RUNNING = 1
+    private const val ABANDONED = 2
+
+    fun <T> run(post: (Runnable) -> Unit, timeoutMs: Long, block: () -> T): T? {
+        val state = AtomicInteger(PENDING)
         var out: T? = null
         val done = CountDownLatch(1)
-        main.post { try { out = block() } finally { done.countDown() } }
-        done.await(2, TimeUnit.SECONDS)
+        post(Runnable {
+            if (!state.compareAndSet(PENDING, RUNNING)) return@Runnable
+            try { out = block() } finally { done.countDown() }
+        })
+        if (done.await(timeoutMs, TimeUnit.MILLISECONDS)) return out
+        if (state.compareAndSet(PENDING, ABANDONED)) return null
+        done.await()
         return out
     }
 }

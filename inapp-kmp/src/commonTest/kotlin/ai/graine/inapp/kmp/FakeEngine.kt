@@ -38,8 +38,41 @@ internal class FakeEngine : GraineEngine {
         started++
     }
 
-    override fun identify(traits: Map<String, Any?>?, memory: Boolean?) { identified += traits to memory; calls += "identify" }
+    /** The identity token each identify carried, in the same order as [identified] (null: none given). */
+    val identityTokens = mutableListOf<String?>()
+    override fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?) {
+        identified += traits to memory
+        identityTokens += identityToken
+        calls += "identify"
+    }
     override fun setMemory(enabled: Boolean) { memoryEnabled = enabled; calls += "setMemory:$enabled" }
+
+    // Your app and your users.
+    /** Every token setIdentityToken handed over, in order. */
+    val tokensSet = mutableListOf<String?>()
+    override fun setIdentityToken(token: String?) { tokensSet += token; calls += "setIdentityToken" }
+    /** The refresher the platform holds now, as the shared code handed it over; null when none. */
+    var refresher: ((done: (String?) -> Unit) -> Unit)? = null
+    /** Each refresher handed over: true for one, false for null (removed). */
+    val refreshersSet = mutableListOf<Boolean>()
+    override fun setIdentityTokenRefresher(refresher: ((done: (String?) -> Unit) -> Unit)?) {
+        this.refresher = refresher
+        refreshersSet += refresher != null
+    }
+    /** What prepareAppVerification answers; null leaves it waiting (the test answers through [prepareDone]). */
+    var prepareAnswer: GraineAppVerdict? = GraineAppVerdict.VERIFIED
+    var prepareDone: ((GraineAppVerdict) -> Unit)? = null
+    override fun prepareAppVerification(done: (GraineAppVerdict) -> Unit) {
+        calls += "prepareAppVerification"
+        prepareDone = done
+        prepareAnswer?.let(done)
+    }
+    override var verification: GraineVerification = GraineVerification()
+    /** Every development mode the shared code set, in order. */
+    val debugTokenModes = mutableListOf<GraineDebugTokenMode>()
+    override var debugTokenMode: GraineDebugTokenMode = GraineDebugTokenMode.AUTOMATIC
+        set(value) { field = value; debugTokenModes += value }
+    override var debugToken: String? = null
     override fun forgetMemory(done: (Result<Int>) -> Unit) { calls += "forgetMemory"; forgetAnswer?.let(done) }
     override fun memories(done: (Result<List<GraineMemory>>) -> Unit) { calls += "memories"; memoriesAnswer?.let(done) }
     override fun setVariables(values: Map<String, Any?>?) { calls += "setVariables:${values?.keys}" }
@@ -51,6 +84,8 @@ internal class FakeEngine : GraineEngine {
     override fun removeField(name: String) { calls += "removeField:$name" }
     override fun clearScreen(screenId: String?) { calls += "clearScreen:$screenId" }
     override fun track(name: String, data: Map<String, Any?>) { tracked += name to data; calls += "track:$name" }
+    val reported = mutableListOf<Triple<String, String?, Map<String, Any?>>>()
+    override fun reportEvent(name: String, detail: String?, data: Map<String, Any?>) { reported += Triple(name, detail, data); calls += "reportEvent:$name" }
     override fun tap(name: String) { calls += "tap:$name" }
     override fun noteInteraction() { calls += "noteInteraction" }
 
@@ -81,6 +116,15 @@ internal class FakeEngine : GraineEngine {
 
     override fun scheduledCalls(done: (Result<List<GraineScheduledCall>>) -> Unit) { calls += "scheduledCalls"; listAnswer?.let(done) }
     override fun cancelScheduledCall(id: String, done: (Result<GraineCallStatus>) -> Unit) { calls += "cancel:$id"; cancelAnswer?.let(done) }
+
+    /** What startWorkflow was asked: workflow, data, key. */
+    val workflowStarts = mutableListOf<Triple<String, Map<String, Any?>, String?>>()
+    var workflowAnswer: Result<GraineWorkflowRun>? = Result.success(GraineWorkflowRun("oex_1", "owf_1", false))
+    override fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: (Result<GraineWorkflowRun>) -> Unit) {
+        workflowStarts += Triple(workflow, data, idempotencyKey)
+        calls += "startWorkflow"
+        workflowAnswer?.let(done)
+    }
 
     override var bookingAvailable: Boolean = false
     override var bookingUnavailableReason: String? = "scheduling_off"

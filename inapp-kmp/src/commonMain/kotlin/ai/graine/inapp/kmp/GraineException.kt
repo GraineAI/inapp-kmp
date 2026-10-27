@@ -31,15 +31,55 @@ sealed class GraineErrorCode(val wire: String) {
     data object NotFound : GraineErrorCode("not_found")
     /** The service could not answer just now. Worth trying again later. */
     data object Unavailable : GraineErrorCode("unavailable")
+    /** [GraineAgent.startWorkflow]: no such workflow, "Your app can start this" is off for it, or it isn't published. */
+    data object NotAllowed : GraineErrorCode("not_allowed")
+    /** [GraineAgent.startWorkflow]: this device isn't one of the user's signed-in devices, or the agent requires a verified user. */
+    data object NotVerified : GraineErrorCode("not_verified")
     /** No answer: no network, or Graine could not be reached. Worth trying again. */
     data object Network : GraineErrorCode("network")
+    /**
+     * This app is not one of the agent's apps ("Only my apps" in the agent's
+     * Your apps settings), or it did not say which app it is. Final: never
+     * retried. New in 0.14.4.
+     */
+    data object AppNotAllowed : GraineErrorCode("app_not_allowed")
+    /**
+     * The agent requires a verified app and this install holds no valid app
+     * pass. The SDK proves the app and sends the request once more before it
+     * says this. New in 0.14.4.
+     */
+    data object AppNotVerified : GraineErrorCode("app_not_verified")
+    /**
+     * The agent requires verified users and the identity sent is not
+     * verified: give `identify` an identity token, or set
+     * [Graine.identityTokenRefresher]. The SDK asks the refresher and sends
+     * the request once more before it says this. New in 0.14.4.
+     */
+    data object IdentityUnverified : GraineErrorCode("identity_unverified")
+    /** The agent requires a server token and none was sent: set [GraineConfig.tokenProvider]. New in 0.14.4. */
+    data object TokenRequired : GraineErrorCode("token_required")
+    /** The server token could not be read or checked; [GraineException.reason] says why. New in 0.14.4. */
+    data object TokenInvalid : GraineErrorCode("token_invalid")
+    /** The server token expired, and a fresh one did not come in time. New in 0.14.4. */
+    data object TokenExpired : GraineErrorCode("token_expired")
+    /**
+     * The server token is for another agent (`agent`) or another user (`user`), or lacks the scope this
+     * needs (`scope`) — [GraineException.reason]. Never retried. New in 0.14.4.
+     */
+    data object TokenScope : GraineErrorCode("token_scope")
+    /** This publishable key was revoked: ship the agent's new key (Embed & Widgets → Keys). New in 0.14.4. */
+    data object KeyRevoked : GraineErrorCode("key_revoked")
+    /** A website bot check did not pass. Only a website sees it. New in 0.14.4. */
+    data object BotCheckFailed : GraineErrorCode("bot_check_failed")
     data class Unknown(val raw: String) : GraineErrorCode(raw)
 
     companion object {
         private val known by lazy {
             listOf(
                 InvalidKey, OriginRefused, RateLimited, InvalidRequest, IdentityRequired, DeviceLimit, SchedulingOff,
-                TooSoon, TooFar, OutsideWindow, TooManyPending, NotFound, Unavailable, Network,
+                TooSoon, TooFar, OutsideWindow, TooManyPending, NotFound, Unavailable, NotAllowed, NotVerified, Network,
+                AppNotAllowed, AppNotVerified, IdentityUnverified,
+                TokenRequired, TokenInvalid, TokenExpired, TokenScope, KeyRevoked, BotCheckFailed,
             ).associateBy { it.wire }
         }
 
@@ -62,6 +102,8 @@ class GraineException(
     message: String,
     /** When the server asked to wait before trying again (`Retry-After`), in seconds; null when it did not say. */
     val retryAfterSeconds: Int? = null,
+    /** The server's one-word reason beside the code (`scope`, `signature`, …), when it gave one. New in 0.14.4. */
+    val reason: String? = null,
 ) : Exception(message) {
     override fun toString(): String = "GraineException(${code.wire}): $message"
 }

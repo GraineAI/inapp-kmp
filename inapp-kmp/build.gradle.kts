@@ -19,18 +19,22 @@ val iosEnabled = providers.gradleProperty("graine.kmp.ios").orNull != "false"
 
 /*
  * THE SHARED CONTRACT'S VECTORS, FOR THE TESTS ON EVERY PLATFORM.
- * sdk/contract/history.json, booking-slots.json and past-sessions.json are
- * vendored at src/commonTest/contract/ — the exported repository carries no
- * contract folder; HistoryVendoredTest, BookingSlotsVendoredTest and
- * PastSessionsVendoredTest hold the copies equal to the contract's — and handed
+ * sdk/contract/history.json, booking-slots.json, past-sessions.json and
+ * app-identity.json and client-tokens.json are vendored at
+ * src/commonTest/contract/ — the exported repository carries no contract
+ * folder; HistoryVendoredTest, BookingSlotsVendoredTest,
+ * PastSessionsVendoredTest, AppIdentityVendoredTest and
+ * ClientTokensVendoredTest hold the copies equal to the contract's — and handed
  * to the common tests as Kotlin strings, since a Kotlin/Native test binary
- * cannot read the source tree.
+ * cannot read the source tree. A vendored file that is missing fails the build.
  */
 val contractVectors by tasks.registering {
     val vendored = mapOf(
         "HISTORY_JSON" to layout.projectDirectory.file("src/commonTest/contract/history.json"),
         "BOOKING_SLOTS_JSON" to layout.projectDirectory.file("src/commonTest/contract/booking-slots.json"),
         "PAST_SESSIONS_JSON" to layout.projectDirectory.file("src/commonTest/contract/past-sessions.json"),
+        "APP_IDENTITY_JSON" to layout.projectDirectory.file("src/commonTest/contract/app-identity.json"),
+        "CLIENT_TOKENS_JSON" to layout.projectDirectory.file("src/commonTest/contract/client-tokens.json"),
     )
     val out = layout.buildDirectory.dir("generated/contract/kotlin")
     vendored.values.forEach { inputs.file(it).withPathSensitivity(PathSensitivity.NONE) }

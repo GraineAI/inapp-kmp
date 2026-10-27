@@ -94,6 +94,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (GraineObjC *)configureWithBaseUrl:(NSString *)baseUrl publishableKey:(NSString *)publishableKey appVersion:(nullable NSString *)appVersion debug:(BOOL)debug endOnBackground:(BOOL)endOnBackground captureTaps:(BOOL)captureTaps transport:(nullable NSString *)transport variablesJSON:(nullable NSString *)variablesJSON;
 + (nullable GraineObjC *)configureWithBaseUrl:(NSString *)baseUrl publishableKey:(NSString *)publishableKey appVersion:(nullable NSString *)appVersion debug:(BOOL)debug endOnBackground:(BOOL)endOnBackground captureTaps:(BOOL)captureTaps transport:(nullable NSString *)transport variablesJSON:(nullable NSString *)variablesJSON name:(NSString *)name;
 + (nullable GraineObjC *)configureWithBaseUrl:(NSString *)baseUrl publishableKey:(NSString *)publishableKey appVersion:(nullable NSString *)appVersion debug:(BOOL)debug endOnBackground:(BOOL)endOnBackground captureTaps:(BOOL)captureTaps transport:(nullable NSString *)transport variablesJSON:(nullable NSString *)variablesJSON name:(NSString *)name chatSize:(nullable NSString *)chatSize;
++ (nullable GraineObjC *)configureWithBaseUrl:(NSString *)baseUrl publishableKey:(NSString *)publishableKey appVersion:(nullable NSString *)appVersion debug:(BOOL)debug endOnBackground:(BOOL)endOnBackground captureTaps:(BOOL)captureTaps transport:(nullable NSString *)transport variablesJSON:(nullable NSString *)variablesJSON name:(NSString *)name chatSize:(nullable NSString *)chatSize chatCloseDelaySeconds:(NSInteger)chatCloseDelaySeconds tokenProvider:(void (^ _Nullable)(void (^done)(NSString * _Nullable token)))tokenProvider;
 + (nullable GraineObjC *)current;
 + (nullable GraineObjC *)named:(NSString *)name;
 
@@ -107,9 +108,19 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) GraineObjCVoice *voice;
 @property (nonatomic, readonly) BOOL bookingAvailable;
 @property (nonatomic, readonly, nullable) NSString *bookingUnavailableReason;
+@property (nonatomic, readonly) NSString *verificationJSON;
+@property (nonatomic, copy) NSString *debugTokenMode;
+@property (nonatomic, readonly, nullable) NSString *debugToken;
+@property (nonatomic, readonly) BOOL hasIdentityTokenRefresher;
 
 - (void)identifyJSON:(nullable NSString *)traitsJSON;
 - (void)identifyJSON:(nullable NSString *)traitsJSON memory:(BOOL)memory;
+- (void)identifyJSON:(nullable NSString *)traitsJSON identityToken:(nullable NSString *)identityToken;
+- (void)identifyJSON:(nullable NSString *)traitsJSON memory:(BOOL)memory identityToken:(nullable NSString *)identityToken;
+- (void)setIdentityToken:(nullable NSString *)token;
+- (void)setIdentityTokenRefresher:(void (^ _Nullable)(void (^done)(NSString * _Nullable token)))refresher;
+- (void)prepareAppVerificationWithCompletion:(void (^)(NSString *verdict))completion;
+- (GraineObjCRegistration *)observeVerification:(void (^)(NSString *json))observer;
 - (void)setMemory:(BOOL)enabled;
 - (void)forgetMemoryWithCompletion:(void (^)(NSInteger deleted, NSError * _Nullable error))completion;
 - (void)memoriesJSONWithCompletion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
@@ -119,12 +130,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)removeField:(NSString *)name;
 - (void)clearScreen:(nullable NSString *)screenId;
 - (void)trackEvent:(NSString *)name dataJSON:(nullable NSString *)dataJSON;
+- (void)reportEvent:(NSString *)name detail:(nullable NSString *)detail dataJSON:(nullable NSString *)dataJSON;
 - (void)tap:(NSString *)name;
 - (void)noteInteraction;
 - (GraineObjCRegistration *)registerJSONAction:(NSString *)name handler:(void (^)(NSString *argsJSON, void (^answer)(NSString *status, NSString *message, NSString * _Nullable dataJSON)))handler;
 - (void)scheduleCallJSONAt:(NSDate *)at reason:(nullable NSString *)reason completion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (void)scheduledCallsJSONWithCompletion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (void)cancelScheduledCall:(NSString *)callId completion:(void (^)(NSString * _Nullable status, NSError * _Nullable error))completion;
+- (void)startWorkflowJSON:(NSString *)workflow dataJSON:(nullable NSString *)dataJSON idempotencyKey:(nullable NSString *)idempotencyKey completion:(void (^)(NSString * _Nullable json, NSError * _Nullable error))completion;
 - (void)presentBookingWithReason:(nullable NSString *)reason completion:(void (^)(GraineObjCScheduledCall * _Nullable call))completion;
 - (NSString *)bookingSlotsJSONForDay:(NSString *)isoDay;
 - (GraineObjCRegistration *)observeEvents:(void (^)(NSString *name, NSString *json))observer;

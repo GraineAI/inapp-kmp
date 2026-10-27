@@ -3,7 +3,10 @@ package ai.graine.inapp.kmp
 import ai.graine.inapp.kmp.objc.GraineObjC
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import platform.Foundation.NSRecursiveLock
 import platform.Foundation.NSString
 import platform.Foundation.create
@@ -14,15 +17,21 @@ import kotlin.math.pow
 internal actual fun createPlatformEngine(config: GraineConfig, name: String): GraineEngine {
     val variables = Bridge.json(config.variables.takeIf { it.isNotEmpty() })
     val size = config.chatSize
+    val provider = config.tokenProvider
     // The iOS SDK's agent under that name: made here, or the one the app already configured from Swift.
-    // Without a chat size, the selector every facade answers.
-    val facade = if (size == null) {
-        GraineObjC.configureWithBaseUrl(
+    // Server tokens ride the selector that carries the provider (new in 0.14.4, with the chat's size and close delay);
+    // without them, without a chat size, the selector every facade answers.
+    val facade = when {
+        provider != null -> GraineObjC.configureWithBaseUrl(
+            config.baseUrl, config.publishableKey, config.appVersion, config.debug, config.endOnBackground, config.captureTaps,
+            config.transport?.wire, variables, name, size?.wire, ChatCloseDelay.clamp(config.chatCloseDelaySeconds).toLong(),
+            IosTokens.block(provider),
+        )
+        size == null -> GraineObjC.configureWithBaseUrl(
             config.baseUrl, config.publishableKey, config.appVersion, config.debug, config.endOnBackground, config.captureTaps,
             config.transport?.wire, variables, name,
         )
-    } else {
-        GraineObjC.configureWithBaseUrl(
+        else -> GraineObjC.configureWithBaseUrl(
             config.baseUrl, config.publishableKey, config.appVersion, config.debug, config.endOnBackground, config.captureTaps,
             config.transport?.wire, variables, name, size.wire,
         )
@@ -30,6 +39,28 @@ internal actual fun createPlatformEngine(config: GraineConfig, name: String): Gr
     // How long the chat stays connected once no screen shows it: the app's, read at configure (a GraineInApp
     // from before 0.14.3 keeps its own).
     return IosEngine(facade).also { it.chatCloseDelaySeconds = ChatCloseDelay.clamp(config.chatCloseDelaySeconds) }
+}
+
+/**
+ * SERVER TOKENS ON iOS: the shared provider — a suspending function — as the
+ * facade's block. Each time the iOS SDK asks, it runs on a scope of its own,
+ * off the main thread, and its answer is handed to `done` once; a throw is
+ * null, as the SDK reads it. The iOS SDK keeps every rule: when to ask, one
+ * question at a time, the 15-second timeout.
+ */
+internal object IosTokens {
+    private val scope: CoroutineScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+
+    fun block(fetch: suspend () -> String?, on: CoroutineScope = scope): (((String?) -> Unit)?) -> Unit = { done ->
+        on.launch {
+            val token = try {
+                fetch()
+            } catch (e: Throwable) {
+                null
+            }
+            done?.invoke(token)
+        }
+    }
 }
 
 internal actual class GraineLock actual constructor() {

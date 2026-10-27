@@ -1,8 +1,13 @@
 package ai.graine.inapp.kmp
 
 import ai.graine.inapp.ActionResult
+import ai.graine.inapp.GraineAppVerdictCallback
 import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallListener
+import ai.graine.inapp.GraineDebugTokenMode as NativeDebugTokenMode
+import ai.graine.inapp.GraineIdentityTokenRefresher
+import ai.graine.inapp.GraineVerification as NativeVerification
+import ai.graine.inapp.GraineVerificationListener
 import ai.graine.inapp.GraineCallPermission as NativeCallPermission
 import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
 import ai.graine.inapp.GraineCallConnection as NativeCallConnection
@@ -24,6 +29,7 @@ import ai.graine.inapp.GraineMemory as NativeMemory
 import ai.graine.inapp.GrainePastSessions as NativePastSessions
 import ai.graine.inapp.GraineSessionTranscript as NativeSessionTranscript
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
+import ai.graine.inapp.GraineWorkflowRun as NativeWorkflowRun
 import ai.graine.inapp.GraineScreen as NativeScreen
 import ai.graine.inapp.SessionConfig
 import android.app.Activity
@@ -47,8 +53,24 @@ internal interface AndroidPort {
     val themeTokensJson: String?
     fun addListener(listener: GraineListener)
 
-    fun identify(traits: Map<String, Any?>?, memory: Boolean?)
+    fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?)
     fun setMemory(enabled: Boolean)
+
+    // Your app and your users (GraineInApp, 0.14.4).
+    /** Replace the identity token for the user identified now (GraineInApp.setIdentityToken). */
+    fun setIdentityToken(token: String?)
+    /** The app's refresher (GraineInApp.identityTokenRefresher); null removes it. */
+    fun setIdentityTokenRefresher(refresher: GraineIdentityTokenRefresher?)
+    /** Prove the app now, for this agent (GraineInApp.prepareAppVerification, its callback form). */
+    fun prepareAppVerification(done: GraineAppVerdictCallback)
+    /** What Graine has proven, for this agent (GraineInApp.verification). */
+    val verification: NativeVerification
+    /** Hear [verification] change, on the main thread (GraineInApp.addVerificationListener). */
+    fun addVerificationListener(listener: GraineVerificationListener)
+    /** Development mode (GraineInApp.debugTokenMode). */
+    var debugTokenMode: NativeDebugTokenMode
+    /** This install's debug token while the build uses one (GraineInApp.debugToken). */
+    val debugToken: String?
     fun forgetMemory(done: GraineCallback<Int>)
     fun memories(done: GraineCallback<List<NativeMemory>>)
     fun setVariables(values: Map<String, Any?>?)
@@ -58,12 +80,14 @@ internal interface AndroidPort {
     fun removeField(name: String)
     fun clearScreen(screenId: String?)
     fun track(name: String, data: Map<String, Any?>)
+    fun reportEvent(name: String, detail: String?, data: Map<String, Any?>)
     fun tap(name: String)
     fun noteInteraction()
     fun registerDeferredAction(name: String, handler: (args: JSONObject, answer: (ActionResult) -> Unit) -> Unit): () -> Unit
     fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>)
     fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>)
     fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>)
+    fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: GraineCallback<NativeWorkflowRun>)
     val bookingAvailable: Boolean
     /** Why not, as a word (GraineInApp.bookingUnavailableReason); null when it can be. */
     val bookingUnavailableReason: String?
@@ -205,8 +229,17 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override val themeTokensJson: String? get() = g.themeTokens()?.toJson()?.toString()
     override fun addListener(listener: GraineListener) = g.addListener(listener)
 
-    override fun identify(traits: Map<String, Any?>?, memory: Boolean?) = g.identify(traits, memory)
+    override fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?) = g.identify(traits, memory, identityToken)
     override fun setMemory(enabled: Boolean) = g.setMemory(enabled)
+    override fun setIdentityToken(token: String?) = g.setIdentityToken(token)
+    override fun setIdentityTokenRefresher(refresher: GraineIdentityTokenRefresher?) { g.identityTokenRefresher = refresher }
+    override fun prepareAppVerification(done: GraineAppVerdictCallback) = g.prepareAppVerification(done)
+    override val verification: NativeVerification get() = g.verification
+    override fun addVerificationListener(listener: GraineVerificationListener) = g.addVerificationListener(listener)
+    override var debugTokenMode: NativeDebugTokenMode
+        get() = g.debugTokenMode
+        set(value) { g.debugTokenMode = value }
+    override val debugToken: String? get() = g.debugToken
     override fun forgetMemory(done: GraineCallback<Int>) = g.forgetMemory(done)
     override fun memories(done: GraineCallback<List<NativeMemory>>) = g.memories(done)
     override fun setVariables(values: Map<String, Any?>?) = g.setVariables(values)
@@ -216,6 +249,7 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun removeField(name: String) = g.removeField(name)
     override fun clearScreen(screenId: String?) = g.clearScreen(screenId)
     override fun track(name: String, data: Map<String, Any?>) = g.track(name, data)
+    override fun reportEvent(name: String, detail: String?, data: Map<String, Any?>) = g.reportEvent(name, detail, data)
     override fun tap(name: String) = g.tap(name)
     override fun noteInteraction() = g.noteInteraction()
     override fun registerDeferredAction(name: String, handler: (args: JSONObject, answer: (ActionResult) -> Unit) -> Unit): () -> Unit =
@@ -223,6 +257,8 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>) = g.scheduleCall(at, reason, done)
     override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) = g.scheduledCalls(done)
     override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) = g.cancelScheduledCall(id, done)
+    override fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: GraineCallback<NativeWorkflowRun>) =
+        g.startWorkflow(workflow, data, idempotencyKey, done)
     override val bookingAvailable: Boolean get() = g.bookingAvailable
     override val bookingUnavailableReason: String? get() = g.bookingUnavailableReason
     override fun bookingSlots(day: Date): List<Date> = g.bookingSlots(day)

@@ -79,6 +79,7 @@ class TypesTest {
         val words = listOf(
             "invalid_key", "origin_refused", "rate_limited", "invalid_request", "identity_required", "device_limit",
             "scheduling_off", "too_soon", "too_far", "outside_window", "too_many_pending", "not_found", "unavailable", "network",
+            "not_allowed", "not_verified",   // startWorkflow (0.14.4)
         )
         for (w in words) {
             val code = GraineErrorCode.from(w)

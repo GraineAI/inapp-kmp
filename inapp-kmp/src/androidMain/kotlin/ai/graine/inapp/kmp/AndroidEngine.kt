@@ -7,6 +7,7 @@ import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallListener
 import ai.graine.inapp.GraineCallOutcome as NativeOutcome
 import ai.graine.inapp.GraineCallState as NativeCallState
+import ai.graine.inapp.GraineIdentityTokenRefresher
 import ai.graine.inapp.GraineListener
 import ai.graine.inapp.Role
 import ai.graine.inapp.SessionConfig
@@ -74,6 +75,9 @@ internal class AndroidEngine(
         port.addListener(listener)
         port.addCallListener(callListener)
         port.addChatChangeListener(Runnable { publishChat() })
+        // What Graine has proven for this agent: as it stands, then each change (the Android SDK tells it on its main thread).
+        port.addVerificationListener { v -> sink.verification(AndroidMapping.verification(v)) }
+        sink.verification(verification)
         // The Android SDK may have been started by the app before (or loaded its session already).
         port.session?.let { sink.session(AndroidMapping.session(it)) }
         // The design's tokens follow the phone between light and dark.
@@ -86,8 +90,27 @@ internal class AndroidEngine(
 
     // ── who, and memory ───────────────────────────────────────────────────
 
-    override fun identify(traits: Map<String, Any?>?, memory: Boolean?) = port.identify(traits, memory)
+    override fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?) = port.identify(traits, memory, identityToken)
     override fun setMemory(enabled: Boolean) = port.setMemory(enabled)
+
+    // ── your app and your users: the Android SDK declares the app, runs Play Integrity and carries the token ──
+
+    override fun setIdentityToken(token: String?) = port.setIdentityToken(token)
+
+    /** The shared refresher as the Android SDK's fun interface: its callback answered once, from any thread. */
+    override fun setIdentityTokenRefresher(refresher: ((done: (String?) -> Unit) -> Unit)?) =
+        port.setIdentityTokenRefresher(refresher?.let { r -> GraineIdentityTokenRefresher { done -> r { token -> done.onToken(token) } } })
+
+    override fun prepareAppVerification(done: (GraineAppVerdict) -> Unit) =
+        port.prepareAppVerification { verdict -> done(AndroidMapping.appVerdict(verdict)) }
+
+    override val verification: GraineVerification get() = AndroidMapping.verification(port.verification)
+
+    override var debugTokenMode: GraineDebugTokenMode
+        get() = AndroidMapping.debugTokenMode(port.debugTokenMode)
+        set(value) { port.debugTokenMode = AndroidMapping.debugTokenMode(value) }
+
+    override val debugToken: String? get() = port.debugToken?.takeIf { it.isNotBlank() }
 
     override fun forgetMemory(done: (Result<Int>) -> Unit) = port.forgetMemory { deleted, error ->
         if (error != null) done(Result.failure(AndroidMapping.error(error))) else done(Result.success(deleted ?: 0))
@@ -108,6 +131,8 @@ internal class AndroidEngine(
     override fun removeField(name: String) = port.removeField(name)
     override fun clearScreen(screenId: String?) = port.clearScreen(screenId)
     override fun track(name: String, data: Map<String, Any?>) = port.track(name, data)
+    /** The Android SDK's `reportEvent`, on its main thread as every call into it is. */
+    override fun reportEvent(name: String, detail: String?, data: Map<String, Any?>) = port.reportEvent(name, detail, data)
     override fun tap(name: String) = port.tap(name)
     override fun noteInteraction() = port.noteInteraction()
 
@@ -124,6 +149,15 @@ internal class AndroidEngine(
                 error != null -> done(Result.failure(AndroidMapping.error(error)))
                 call != null -> done(Result.success(AndroidMapping.scheduledCall(call)))
                 else -> done(Result.failure(GraineException(GraineErrorCode.Unavailable, "The booking was accepted but not described.")))
+            }
+        }
+
+    override fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: (Result<GraineWorkflowRun>) -> Unit) =
+        port.startWorkflow(workflow, data, idempotencyKey) { run, error ->
+            when {
+                error != null -> done(Result.failure(AndroidMapping.error(error)))
+                run != null -> done(Result.success(GraineWorkflowRun(run.runId, run.workflowId, run.alreadyRunning)))
+                else -> done(Result.failure(GraineException(GraineErrorCode.Unavailable, "The workflow was started, but its run id did not come back.")))
             }
         }
 

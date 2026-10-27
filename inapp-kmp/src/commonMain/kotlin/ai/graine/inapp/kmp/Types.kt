@@ -147,6 +147,19 @@ sealed class GraineCallSource(val wire: String) {
     }
 }
 
+/**
+ * A run [GraineAgent.startWorkflow] started (0.14.4) — or the one the user
+ * already had under way ([alreadyRunning]: that run, never a second).
+ */
+data class GraineWorkflowRun(
+    /** The run's id (`oex_…`). */
+    val runId: String,
+    /** The workflow's id (`owf_…`); null when the answer did not say. */
+    val workflowId: String?,
+    /** True when the user already had a run of this workflow under way. */
+    val alreadyRunning: Boolean,
+)
+
 /** A call booked to ring this user (or, with nobody signed in, this install) later. */
 data class GraineScheduledCall(
     val id: String,
@@ -167,6 +180,22 @@ data class GraineScheduledCall(
 
 /** A platform Graine can ring. */
 enum class GrainePlatform(val wire: String) { IOS("ios"), ANDROID("android") }
+
+/**
+ * WHETHER AN AGENT CAN BE BOOKED FROM THE APP NOW, and why not —
+ * [GraineAgent.bookingState], as it changes. New in 0.14.4.
+ */
+data class GraineBookingState(
+    /** [GraineAgent.bookingAvailable]: Graine rings this phone, the agent lets users book, and the user is identified. */
+    val available: Boolean,
+    /**
+     * [GraineAgent.bookingUnavailableReason]: `not_loaded` (not yet: the
+     * agent's settings, which name the trait that identifies the user, have
+     * not arrived), `rings_not_set_up`, `scheduling_off` or `not_identified`;
+     * null when [available].
+     */
+    val reason: String?,
+)
 
 /**
  * What the agent allows when a user books a call, from the session (Calls &

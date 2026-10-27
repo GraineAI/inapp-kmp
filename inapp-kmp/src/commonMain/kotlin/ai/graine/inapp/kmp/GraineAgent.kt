@@ -12,10 +12,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -53,7 +50,6 @@ class GraineAgent internal constructor(
     internal var claimed = false
 
     internal val sessionState = MutableStateFlow<GraineSession?>(null)
-    private val sessionFailure = MutableStateFlow<String?>(null)
     internal val eventFlow = MutableSharedFlow<GraineEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     internal val chatTurns = MutableStateFlow<List<GraineChatTurn>>(emptyList())
     internal val chatStatus = MutableStateFlow(GraineChatStatus.IDLE)
@@ -72,6 +68,8 @@ class GraineAgent internal constructor(
     internal val themeState = MutableStateFlow<GraineThemeTokens?>(null)
     internal val componentState = MutableStateFlow<GraineComponent?>(null)
     internal val componentPendingState = MutableStateFlow(false)
+    internal val bookingStateFlow = MutableStateFlow(GraineBookingState(available = false, reason = NOT_LOADED))
+    internal val verificationState = MutableStateFlow(GraineVerification())
     /** Lets a loader that has stood too long go, as the SDK's renderer does. */
     @Volatile
     private var pendingExpiry: Job? = null
@@ -139,6 +137,7 @@ class GraineAgent internal constructor(
         current = engine
         engine.start(sink)
         attachHandler?.let { engine.chatSetAttachHandler(it) }
+        refreshBooking()
     }
 
     internal fun engineOrNull(): GraineEngine? = current
@@ -207,23 +206,54 @@ class GraineAgent internal constructor(
      * this device then. [reason] (at most 120 characters) is kept with the call
      * for the agent, never put in the push that rings it.
      *
-     * Checked here first, against [schedulingRules], before anything is sent:
+     * Checked against [schedulingRules] before anything is sent:
      * `scheduling_off` when users may not book, `too_soon` before `earliest()`,
-     * `too_far` after `latest()`. Then the server's own: `outside_window` (the
-     * agent's calling hours, in this device's time zone), `too_many_pending`,
-     * `identity_required`, `rate_limited`… — every refusal a [GraineException].
+     * `too_far` after `latest()` — here, once the agent's settings have
+     * arrived; before they have, by the platform SDK, which waits for them
+     * and refuses with `identity_required` when someone else was identified
+     * meanwhile (a call is never booked for a user who did not ask for it), or
+     * with the settings' own reason when they could not be loaded. Then the
+     * server's own: `outside_window` (the agent's calling hours, in this
+     * device's time zone), `too_many_pending`, `identity_required`,
+     * `rate_limited`… — every refusal a [GraineException].
      */
     suspend fun scheduleCall(at: Instant, reason: String? = null): GraineScheduledCall {
         val engine = engine()
-        val session = awaitSession()
-        // With no session at all (it could not load), the platform SDK and the server decide.
-        if (session != null) Scheduling.check(at, Clock.System.now(), session.schedulingRules)?.let { throw it }
+        // Handed to the platform SDK at once: it waits for the session itself and keeps who asked. Waited for here
+        // first, the booking would reach it only after a switch made meanwhile — as the next user's.
+        sessionState.value?.let { session -> Scheduling.check(at, Clock.System.now(), session.schedulingRules)?.let { throw it } }
         val why = reason?.trim()?.take(Scheduling.REASON_MAX)?.takeIf { it.isNotEmpty() }
         return await { _, done -> engine.scheduleCall(at, why, done) }
     }
 
     /** The calls this agent has booked for the signed-in user (or this install) that are still to come, soonest first. */
     suspend fun scheduledCalls(): List<GraineScheduledCall> = await { e, done -> e.scheduledCalls(done) }
+
+    /**
+     * Start one of your outreach workflows for the user this app signed in
+     * (0.14.4) — a welcome call after sign-up, a follow-up after an order —
+     * with no server of your own. The workflow must have "Your app can start
+     * this" on (its Connect tab); [workflow] is its exact name or its id
+     * (`owf_…`).
+     *
+     * The run is for the identified user — `identify` with the agent's
+     * identity trait first — never for anyone [data] names. [data]: the
+     * contact fields the workflow allows — text (200 characters), numbers,
+     * yes/no; at most 12. Anything else is left out, never refused.
+     * [idempotencyKey]: two calls with the same key start one run; without
+     * one the platform SDK makes one for the call, and asks once more with it
+     * when a request got no answer.
+     *
+     * Returns the run — `alreadyRunning` when the user already had one of this
+     * workflow under way (that run, never a second). Throws
+     * [GraineException]: `invalid_request` (no workflow, a key that is not
+     * one) and `identity_required` (nobody identified: nothing is asked) from
+     * the device; `not_allowed`, `not_verified`, `rate_limited`
+     * ([GraineException.retryAfterSeconds]), `unavailable`, `invalid_request`
+     * from Graine; `network` when no answer came twice.
+     */
+    suspend fun startWorkflow(workflow: String, data: Map<String, Any?> = emptyMap(), idempotencyKey: String? = null): GraineWorkflowRun =
+        await { e, done -> e.startWorkflow(workflow, data, idempotencyKey, done) }
 
     /**
      * Whether this agent can be booked from the app now — what the SDK's own
@@ -251,6 +281,94 @@ class GraineAgent internal constructor(
             val engine = current ?: return NOT_LOADED
             return engine.bookingUnavailableReason
         }
+
+    /**
+     * WHETHER THIS AGENT CAN BE BOOKED NOW, AS IT CHANGES — [bookingAvailable]
+     * and [bookingUnavailableReason] together, read again from the platform
+     * SDK when the agent's session arrives or changes, after `identify` and
+     * `setMemory`, and when the session could not be loaded. Collect it to
+     * show or hide your own "Book a call", rather than reading the two once
+     * at launch: until the session has arrived the answer is `not_loaded`,
+     * which means "not yet", never a final no.
+     *
+     *     Graine.bookingState.collect { state ->
+     *         bookButton.isVisible = state.available
+     *     }
+     *
+     * New in 0.14.4.
+     */
+    val bookingState: StateFlow<GraineBookingState> = bookingStateFlow.asStateFlow()
+
+    /** One refresh at a time: reading the platform and writing the answer are one step. */
+    private val bookingLock = GraineLock()
+
+    /**
+     * [bookingState] read again from the platform SDK's rule, as it stands
+     * now. The read and the write happen under one lock, so a refresh that
+     * read the platform before a change on another thread (the session
+     * arriving on the main thread, identify() on a background one) can never
+     * write after that change's own refresh: the last word is always the
+     * latest read. The lock is re-entrant, so a collector that refreshes from
+     * inside its collect cannot stall it.
+     */
+    internal fun refreshBooking() {
+        bookingLock.locked {
+            val next = GraineBookingState(bookingAvailable, bookingUnavailableReason)
+            if (bookingStateFlow.value != next) bookingStateFlow.value = next
+        }
+    }
+
+    /**
+     * WHAT GRAINE HAS PROVEN ABOUT THIS APP AND ITS USER, for this agent, as
+     * it changes: [GraineVerification.app] — off, checking, verified,
+     * testBuild, debugToken or unverified — and [GraineVerification.user] —
+     * off, verified, testUser, unverified or invalid — each with Graine's
+     * reason when it is not proven. Both off until the agent's settings ask
+     * for them (Agent → Embed & Widgets → Install: "Require a verified app",
+     * "Verified users"); the verdicts arrive with the agent's answers, so read
+     * them as what Graine said last. For logs, a support screen, or to know
+     * that an identity token was refused (`user` invalid, `userReason`
+     * `expired`) — never needed to make a request: the SDK proves the app and
+     * sends the token by itself. On iOS it needs the GraineInApp of this
+     * version (an older one stays off). New in 0.14.4.
+     *
+     *     agent.verification.collect { v -> log("app ${v.app.word}, user ${v.user.word}") }
+     */
+    val verification: StateFlow<GraineVerification> = verificationState.asStateFlow()
+
+    /**
+     * PROVE THIS APP NOW, for this agent — on first launch, say, so the first
+     * conversation never waits for it — and return the verdict. Waits for the
+     * agent's settings first. Nothing is sent when the agent does not ask for
+     * a verified app ([GraineAppVerdict.OFF]), when an app pass with more than
+     * six hours left is held (its verdict), or in a build that uses a debug
+     * token ([Graine.debugTokenMode]: the verdict arrives with the next
+     * conversation). The SDK proves the app by itself too — after the
+     * settings arrive, and when the pass is due — so calling this is never
+     * required. Never throws for a proof that failed: that is
+     * [GraineAppVerdict.UNVERIFIED], and the SDK tries again on its own. On
+     * iOS it needs the GraineInApp of this version (an older one answers
+     * [verification]'s verdict, off). New in 0.14.4.
+     */
+    suspend fun prepareAppVerification(): GraineAppVerdict =
+        await { e, done -> e.prepareAppVerification { verdict -> done(Result.success(verdict)) } }
+
+    /**
+     * SOMETHING WORTH SPEAKING UP ABOUT: the agent may speak first — the user
+     * tapped a reminder and the app opened the chat, so it reports
+     * `reportEvent("reminder_opened", "The user came from the breakfast
+     * reminder")` and the agent opens with its check-in. Paced by the agent:
+     * 20 s apart and 3 per conversation by default; [data] may carry
+     * `cooldown_seconds`, `max_per_session`, or `quiet = true` to record it
+     * without speaking, and anything else rides along. Dropped when no chat
+     * or call is live — open the chat and wait for [GraineChat.status] ONLINE
+     * first. `track` informs without speaking. On iOS it needs the GraineInApp
+     * of this version (an older one drops it). New in 0.14.4.
+     */
+    fun reportEvent(name: String, detail: String? = null, data: Map<String, Any?> = emptyMap()) {
+        if (name.isBlank()) return
+        engine().reportEvent(name.trim(), detail?.takeIf { it.isNotBlank() }, data)
+    }
 
     /**
      * The times the SDK's booking sheet would offer on [day], in the phone's
@@ -335,16 +453,6 @@ class GraineAgent internal constructor(
 
     // ── plumbing ──────────────────────────────────────────────────────────
 
-    /** The session, waited for — at most [Graine.SESSION_WAIT_MS], and no longer once it is known not to be coming. */
-    internal suspend fun awaitSession(): GraineSession? {
-        sessionState.value?.let { return it }
-        return withTimeoutOrNull(Graine.SESSION_WAIT_MS) {
-            combine(sessionState, sessionFailure) { s, failed -> s to failed }
-                .first { (s, failed) -> s != null || failed != null }
-                .first
-        }
-    }
-
     /** One platform request, as a suspending call: its value, or its GraineException. */
     private suspend fun <T> await(call: (GraineEngine, (Result<T>) -> Unit) -> Unit): T {
         val engine = engine()
@@ -357,12 +465,14 @@ class GraineAgent internal constructor(
     private val sink = object : EngineSink {
         override fun session(session: GraineSession) {
             sessionState.value = session
-            sessionFailure.value = null
+            // What depends on the session — which trait identifies the user — is read again before anyone hears it arrived.
+            refreshBooking()
             eventFlow.tryEmit(GraineEvent.SessionReady(session))
         }
 
         override fun sessionFailed(message: String) {
-            if (sessionState.value == null) sessionFailure.value = message
+            // What depends on the session is read again: booking stays `not_loaded`, or what the kept settings say.
+            refreshBooking()
         }
 
         override fun event(event: GraineEvent) {
@@ -416,6 +526,10 @@ class GraineAgent internal constructor(
         override fun theme(tokens: GraineThemeTokens?) {
             themeState.value = tokens
         }
+
+        override fun verification(verification: GraineVerification) {
+            verificationState.value = verification
+        }
     }
 
     /** Back to before configure(): tests only. */
@@ -423,7 +537,6 @@ class GraineAgent internal constructor(
         current = null
         claimed = false
         sessionState.value = null
-        sessionFailure.value = null
         chatTurns.value = emptyList()
         chatStatus.value = GraineChatStatus.IDLE
         chatFailed.value = false
@@ -441,6 +554,8 @@ class GraineAgent internal constructor(
         attachHandler = null
         voiceInfo.value = GraineVoiceInfo()
         themeState.value = null
+        bookingStateFlow.value = GraineBookingState(available = false, reason = NOT_LOADED)
+        verificationState.value = GraineVerification()
         componentGone()
     }
 

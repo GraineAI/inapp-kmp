@@ -43,6 +43,12 @@ object Graine {
     /** [GraineCalls.speakerByDefault], kept here so one set before configure reaches every engine made after. */
     @Volatile internal var speakerByDefault: Boolean = true
 
+    /** [debugTokenMode] as the app chose it, kept so one set before configure reaches every engine made after; null: never chosen. */
+    @Volatile private var debugTokenModeChosen: GraineDebugTokenMode? = null
+
+    /** [identityTokenRefresher], kept so one set before configure reaches every engine made after. */
+    @Volatile private var tokenRefresher: (suspend () -> String?)? = null
+
     private val lock = GraineLock()
     /** Every agent asked for, configured or not, in the order they were first named. */
     private val holders = LinkedHashMap<String, GraineAgent>()
@@ -71,9 +77,12 @@ object Graine {
         val agent = holder(normalise(name))
         // Claimed under the lock, made outside it: the platform SDK is never called holding it.
         val mine = lock.locked { if (agent.claimed) false else { agent.claimed = true; true } }
-        if (mine) install(agent, createPlatformEngine(config, agent.name))
+        if (mine) install(agent, engineFactory(config, agent.name))
         return agent
     }
+
+    /** What makes an agent's engine from its whole configuration (its token provider too): the platform's; tests hand in their own. */
+    internal var engineFactory: (config: GraineConfig, name: String) -> GraineEngine = ::createPlatformEngine
 
     /** The agent configured under [name]; null when it is not configured. */
     fun agent(name: String = DEFAULT_AGENT): GraineAgent? = lock.locked { holders[normalise(name)] }?.takeIf { it.isConfigured }
@@ -87,9 +96,15 @@ object Graine {
     /** The engine for an agent; tests install fakes. */
     internal fun install(agent: GraineAgent, engine: GraineEngine) {
         if (callsReporter == null) callsReporter = agent
+        // What the app chose before this agent was configured reaches its platform SDK before anything else does.
+        debugTokenModeChosen?.let { engine.debugTokenMode = it }
+        tokenRefresher?.let { engine.setIdentityTokenRefresher(IdentityTokens.bridge(it)) }
         agent.install(engine)
         engine.callsSetSpeakerByDefault(speakerByDefault)
     }
+
+    /** Every configured agent's engine, in the order they were configured. */
+    private fun engines(): List<GraineEngine> = lock.locked { holders.values.mapNotNull { it.engineOrNull() } }
 
     internal fun install(engine: GraineEngine, name: String = DEFAULT_AGENT) = install(holder(normalise(name)), engine)
 
@@ -152,6 +167,22 @@ object Graine {
     /** What the default agent allows when a user books a call. */
     val schedulingRules: GraineSchedulingRules get() = defaultAgent.schedulingRules
 
+    /**
+     * What Graine has proven about this app and its user, for the default
+     * agent, as it changes — off until the agent's settings ask for it. See
+     * [GraineAgent.verification]. New in 0.14.4.
+     */
+    val verification: StateFlow<GraineVerification> get() = defaultAgent.verification
+
+    /**
+     * Prove this app now, for the default agent — on first launch, so the
+     * first conversation never waits for it — and return the verdict. See
+     * [GraineAgent.prepareAppVerification]. New in 0.14.4.
+     *
+     *     scope.launch { Graine.prepareAppVerification() }   // after configure, on first launch
+     */
+    suspend fun prepareAppVerification(): GraineAppVerdict = defaultAgent.prepareAppVerification()
+
     /** Native calls — the app's, whichever agent a call is with. */
     val calls: GraineCalls = GraineCalls()
 
@@ -174,6 +205,10 @@ object Graine {
     /** Book a call from the default agent. See [GraineAgent.scheduleCall]: the agent's rules are checked first. */
     suspend fun scheduleCall(at: Instant, reason: String? = null): GraineScheduledCall = defaultAgent.scheduleCall(at, reason)
 
+    /** Start one of your outreach workflows for the signed-in user, from the default agent. See [GraineAgent.startWorkflow]. */
+    suspend fun startWorkflow(workflow: String, data: Map<String, Any?> = emptyMap(), idempotencyKey: String? = null): GraineWorkflowRun =
+        defaultAgent.startWorkflow(workflow, data, idempotencyKey)
+
     /** The default agent's booked calls still to come. */
     suspend fun scheduledCalls(): List<GraineScheduledCall> = defaultAgent.scheduledCalls()
 
@@ -191,6 +226,14 @@ object Graine {
      * [GraineAgent.bookingUnavailableReason]. New in 0.14.0.
      */
     val bookingUnavailableReason: String? get() = defaultAgent.bookingUnavailableReason
+
+    /**
+     * Whether the default agent can be booked now, and why not, AS IT CHANGES
+     * — the way to show or hide a "Book a call" of your own: collect it,
+     * rather than reading [bookingAvailable] once at launch, before the
+     * agent's session has loaded. See [GraineAgent.bookingState]. New in 0.14.4.
+     */
+    val bookingState: StateFlow<GraineBookingState> get() = defaultAgent.bookingState
 
     /**
      * The times the SDK's booking sheet would offer on [day] in the phone's
@@ -240,11 +283,103 @@ object Graine {
      * CONNECTING, then ONLINE). The same identity with other traits, or another
      * memory choice, changes nothing on the open chat. Identify before showing
      * the chat where you can. On iOS it needs the GraineInApp of this version.
+     *
+     * `identityToken` (new in 0.14.4) proves the identity, for an agent with
+     * "Verified users" on: the HMAC your server computes over the identity
+     * value with the agent's user secret, or the ID token (JWT) of your own
+     * sign-in. It travels only inside the request's identity, beside the value
+     * it proves — never in variables, the screen's context or a log line — and
+     * is held in memory only. Another user, or null traits, drops the token
+     * (and the user pass Graine gave for it) in the same step; the same user
+     * without a token keeps the one they have. Replace it with
+     * [setIdentityToken]; let the SDK ask for a fresh one with
+     * [identityTokenRefresher]. On iOS the token needs the GraineInApp of this
+     * version (an older one identifies the user without it).
+     *
+     *     Graine.identify(mapOf("user_id" to user.id), identityToken = api.graineIdentityToken())
      */
-    fun identify(traits: Map<String, Any?>?, memory: Boolean? = null) = primary().engine().identify(traits, memory)
+    fun identify(traits: Map<String, Any?>?, memory: Boolean? = null, identityToken: String? = null) {
+        primary().engine().identify(traits, memory, identityToken)
+        bookingChanged()
+    }
+
+    /**
+     * Replace the identity token for the user identified now, without
+     * identifying anyone else — a fresh one your server minted, or your
+     * sign-in's renewed ID token. Null clears it. For every agent, as
+     * [identify] is. With nobody identified there is no one to attach it to:
+     * identify the user with their token instead. On iOS it needs the
+     * GraineInApp of this version. New in 0.14.4.
+     */
+    fun setIdentityToken(token: String?) = primary().engine().setIdentityToken(token)
+
+    /**
+     * HOW THE SDK ASKS YOUR APP FOR A FRESH IDENTITY TOKEN — a suspending
+     * function that returns one for the signed-in user (from your server, or
+     * your sign-in's SDK), or null to keep the token the SDK has. The SDK
+     * calls it when Graine says the token expired, when a request is refused
+     * [GraineErrorCode.IdentityUnverified] (that request is then sent once
+     * more with the new token), before a conversation starts with a JWT that
+     * has less than a minute left, and when a call rings — at most once every
+     * 30 seconds, never twice at once. It starts on the main thread, so make
+     * the network call suspend (Ktor's do) rather than block. Returning null,
+     * or throwing, keeps the token as it was. One for the whole app, like
+     * [identify]; may be set before [configure]. Null (the default): the SDK
+     * only ever sends the token it was given. On iOS it needs the GraineInApp
+     * of this version. New in 0.14.4.
+     *
+     *     Graine.identityTokenRefresher = { api.graineIdentityToken() }   // a suspending call to your server
+     */
+    var identityTokenRefresher: (suspend () -> String?)?
+        get() = tokenRefresher
+        set(value) {
+            tokenRefresher = value
+            val bridged = value?.let { IdentityTokens.bridge(it) }
+            engines().forEach { it.setIdentityTokenRefresher(bridged) }
+        }
+
+    /**
+     * DEVELOPMENT MODE, for every agent: whether this build sends a debug
+     * token instead of proving itself with App Attest (iOS) or Play Integrity
+     * (Android) — [GraineDebugTokenMode.AUTOMATIC] (the default) in a debug
+     * build and never in a release build, [GraineDebugTokenMode.ALWAYS] in any
+     * build (an internal QA build), [GraineDebugTokenMode.NEVER] in none. Set
+     * it before [configure], so the first request already follows it. A
+     * debug token counts only once an Admin registers it on the agent: see
+     * [debugToken]. On iOS it needs the GraineInApp of this version.
+     * New in 0.14.4.
+     *
+     *     Graine.debugTokenMode = GraineDebugTokenMode.ALWAYS   // an internal QA build
+     *     Graine.configure(config)
+     */
+    var debugTokenMode: GraineDebugTokenMode
+        get() = debugTokenModeChosen ?: primary().engineOrNull()?.debugTokenMode ?: GraineDebugTokenMode.AUTOMATIC
+        set(value) {
+            debugTokenModeChosen = value
+            engines().forEach { it.debugTokenMode = value }
+        }
+
+    /**
+     * This install's debug token while the build uses one ([debugTokenMode]),
+     * else null — a release build never makes one, and null before
+     * [configure]. Made once per install and logged once, with where to
+     * register it: Agent → Embed & Widgets → Install → Development → Debug
+     * tokens. Registered there, this build counts as a verified app
+     * ([GraineAppVerdict.DEBUG_TOKEN]) while "Require a verified app" is on.
+     * New in 0.14.4.
+     */
+    val debugToken: String? get() = primary().engineOrNull()?.debugToken
 
     /** Remember the current user's conversations, or stop — `identify(the same traits, memory = enabled)`. Every agent. */
-    fun setMemory(enabled: Boolean) = primary().engine().setMemory(enabled)
+    fun setMemory(enabled: Boolean) {
+        primary().engine().setMemory(enabled)
+        bookingChanged()
+    }
+
+    /** Who the user is changed: every agent's [GraineAgent.bookingState] is read again. */
+    private fun bookingChanged() {
+        lock.locked { holders.values.toList() }.forEach { it.refreshBooking() }
+    }
 
     /** What the user is looking at — the app's, heard by whichever agent has a live conversation. Null: nothing. */
     fun setScreen(screen: GraineScreen?) = primary().engine().setScreen(screen)
@@ -268,6 +403,17 @@ object Graine {
         primary().engine().track(name, data)
     }
 
+    /**
+     * Something worth speaking up about, told to the default agent's live chat
+     * or call: the agent may speak first. Paced (20 s apart, 3 per
+     * conversation by default; [data] may carry `cooldown_seconds`,
+     * `max_per_session`, or `quiet = true` to record without speaking).
+     * Dropped when no chat or call is live — open the chat and wait for
+     * [GraineChat.status] ONLINE first. See [GraineAgent.reportEvent]. New in 0.14.4.
+     */
+    fun reportEvent(name: String, detail: String? = null, data: Map<String, Any?> = emptyMap()) =
+        defaultAgent.reportEvent(name, detail, data)
+
     /** A tap on a control the agent should know about (`tap:<name>`), for a control the SDK cannot name itself. */
     fun tap(name: String) = primary().engine().tap(name)
 
@@ -280,8 +426,9 @@ object Graine {
         callsReporter = null
         callInfo.value = GraineCallInfo()
         speakerByDefault = true
+        debugTokenModeChosen = null
+        tokenRefresher = null
+        engineFactory = ::createPlatformEngine
     }
 
-    /** How long a booking waits for the agent's configuration: past the session request's own timeouts. */
-    internal const val SESSION_WAIT_MS = 20_000L
 }

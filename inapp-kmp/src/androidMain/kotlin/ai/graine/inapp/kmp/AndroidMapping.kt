@@ -1,7 +1,11 @@
 package ai.graine.inapp.kmp
 
 import ai.graine.inapp.ActionResult
+import ai.graine.inapp.GraineAppVerdict as NativeAppVerdict
 import ai.graine.inapp.GraineCallConnection as NativeCallConnection
+import ai.graine.inapp.GraineDebugTokenMode as NativeDebugTokenMode
+import ai.graine.inapp.GraineUserVerdict as NativeUserVerdict
+import ai.graine.inapp.GraineVerification as NativeVerification
 import ai.graine.inapp.GraineCallOutcome as NativeOutcome
 import ai.graine.inapp.GraineCallPermission as NativeCallPermission
 import ai.graine.inapp.GraineCallPermissions as NativeCallPermissions
@@ -25,14 +29,24 @@ import ai.graine.inapp.GraineSessionTranscript as NativeSessionTranscript
 import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
 import ai.graine.inapp.GraineScreen as NativeScreen
+import ai.graine.inapp.GraineTokenProvider as NativeTokenProvider
 import ai.graine.inapp.GraineWidget
 import ai.graine.inapp.Role
 import ai.graine.inapp.SessionConfig
 import ai.graine.inapp.Transport
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Date
+
+/** Where the app's suspending token provider runs when the Android SDK asks it: off the main thread, one scope for the process. */
+internal object TokenScope {
+    val scope: CoroutineScope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Default) }
+}
 
 /*
  * THE ANDROID SDK'S TYPES ⇄ THE SHARED ONES — pure functions, proven on the
@@ -52,7 +66,26 @@ internal object AndroidMapping {
         captureTaps = c.captureTaps,
         chatSize = c.chatSize?.let { chatSize(it) },
         chatCloseDelaySeconds = ChatCloseDelay.clamp(c.chatCloseDelaySeconds),
+        tokenProvider = c.tokenProvider?.let { tokenProvider(it) },
     )
+
+    /**
+     * The shared provider — a suspending function — as the Android SDK's
+     * callback one: run on a scope of its own each time the SDK asks, its
+     * answer handed back once; a throw is null, as the SDK reads it. The SDK
+     * keeps every rule (when to ask, one question at a time, the timeout).
+     */
+    fun tokenProvider(fetch: suspend () -> String?, scope: CoroutineScope = TokenScope.scope): NativeTokenProvider =
+        NativeTokenProvider { done ->
+            scope.launch {
+                val token = try {
+                    fetch()
+                } catch (e: Throwable) {
+                    null
+                }
+                done(token)
+            }
+        }
 
     /** The same three sizes, by name. */
     fun chatSize(s: GraineChatSize): NativeChatSize = NativeChatSize.valueOf(s.name)
@@ -136,8 +169,47 @@ internal object AndroidMapping {
 
     fun callStatus(s: NativeCallStatus): GraineCallStatus = GraineCallStatus.from(s.wire)
 
-    /** The Android SDK's error as the shared one: its code's word, its sentence, and a rate limit's wait. */
-    fun error(e: GraineError): GraineException = GraineException(GraineErrorCode.from(e.code.wire), e.message, e.retryAfterSeconds)
+    /** The Android SDK's error as the shared one: its code's word, its sentence, a rate limit's wait and the server's reason. */
+    fun error(e: GraineError): GraineException = GraineException(GraineErrorCode.from(e.code.wire), e.message, e.retryAfterSeconds, e.reason)
+
+    // Your app and your users: the same verdicts and modes on both sides, case for case (a new one fails to compile here).
+
+    fun appVerdict(v: NativeAppVerdict): GraineAppVerdict = when (v) {
+        NativeAppVerdict.OFF -> GraineAppVerdict.OFF
+        NativeAppVerdict.CHECKING -> GraineAppVerdict.CHECKING
+        NativeAppVerdict.VERIFIED -> GraineAppVerdict.VERIFIED
+        NativeAppVerdict.TEST_BUILD -> GraineAppVerdict.TEST_BUILD
+        NativeAppVerdict.DEBUG_TOKEN -> GraineAppVerdict.DEBUG_TOKEN
+        NativeAppVerdict.UNVERIFIED -> GraineAppVerdict.UNVERIFIED
+    }
+
+    fun userVerdict(v: NativeUserVerdict): GraineUserVerdict = when (v) {
+        NativeUserVerdict.OFF -> GraineUserVerdict.OFF
+        NativeUserVerdict.VERIFIED -> GraineUserVerdict.VERIFIED
+        NativeUserVerdict.TEST_USER -> GraineUserVerdict.TEST_USER
+        NativeUserVerdict.UNVERIFIED -> GraineUserVerdict.UNVERIFIED
+        NativeUserVerdict.INVALID -> GraineUserVerdict.INVALID
+    }
+
+    /** What the Android SDK says Graine has proven, verdict for verdict, with Graine's reasons. */
+    fun verification(v: NativeVerification): GraineVerification = GraineVerification(
+        app = appVerdict(v.app),
+        appReason = v.appReason?.trim()?.takeIf { it.isNotEmpty() },
+        user = userVerdict(v.user),
+        userReason = v.userReason?.trim()?.takeIf { it.isNotEmpty() },
+    )
+
+    fun debugTokenMode(m: NativeDebugTokenMode): GraineDebugTokenMode = when (m) {
+        NativeDebugTokenMode.AUTOMATIC -> GraineDebugTokenMode.AUTOMATIC
+        NativeDebugTokenMode.ALWAYS -> GraineDebugTokenMode.ALWAYS
+        NativeDebugTokenMode.NEVER -> GraineDebugTokenMode.NEVER
+    }
+
+    fun debugTokenMode(m: GraineDebugTokenMode): NativeDebugTokenMode = when (m) {
+        GraineDebugTokenMode.AUTOMATIC -> NativeDebugTokenMode.AUTOMATIC
+        GraineDebugTokenMode.ALWAYS -> NativeDebugTokenMode.ALWAYS
+        GraineDebugTokenMode.NEVER -> NativeDebugTokenMode.NEVER
+    }
 
     fun session(s: SessionConfig): GraineSession = s.schedulingRules.let { r ->
         sessionOf(

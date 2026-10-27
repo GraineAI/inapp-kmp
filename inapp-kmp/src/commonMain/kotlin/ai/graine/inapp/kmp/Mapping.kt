@@ -220,13 +220,31 @@ internal object Bridge {
 
     // ── platform → shared code ────────────────────────────────────────────
 
-    /** An error as the facade reports it: its code word, its sentence, and `Retry-After` when there was one. */
-    fun error(code: String?, message: String?, retryAfterSeconds: Int? = null): GraineException =
+    /**
+     * An error as the facade reports it: its code word, its sentence, `Retry-After`
+     * when there was one, and the server's one-word reason beside the code
+     * (`scope`, `signature`, …) when it gave one.
+     */
+    fun error(code: String?, message: String?, retryAfterSeconds: Int? = null, reason: String? = null): GraineException =
         GraineException(
             GraineErrorCode.from(code),
             message?.takeIf { it.isNotBlank() } ?: "Graine could not complete the request.",
             retryAfterSeconds?.takeIf { it > 0 },
+            reason?.trim()?.takeIf { it.isNotEmpty() },
         )
+
+    /**
+     * What Graine has proven, as the facade's JSON says it — `{app, appReason,
+     * user, userReason}`, the SDKs' words (`testBuild`; Graine's `test_build`
+     * reads the same). Nothing readable is the state before any session: off,
+     * off. A verdict this build does not know is not proven (unverified).
+     */
+    fun verification(json: String?): GraineVerification {
+        val o = Json.obj(json) ?: return GraineVerification()
+        val app = (o["app"] as? String)?.let { GraineAppVerdict.from(it) ?: GraineAppVerdict.UNVERIFIED } ?: GraineAppVerdict.OFF
+        val user = (o["user"] as? String)?.let { GraineUserVerdict.from(it) ?: GraineUserVerdict.UNVERIFIED } ?: GraineUserVerdict.OFF
+        return GraineVerification(app, str(o["appReason"])?.trim(), user, str(o["userReason"])?.trim())
+    }
 
     fun instant(v: Any?): Instant? = when (v) {
         is Long -> Instant.fromEpochMilliseconds(v)
@@ -259,6 +277,13 @@ internal object Bridge {
 
     fun scheduledCalls(json: String?): List<GraineScheduledCall> =
         Json.array(json).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { o -> scheduledCall(o) } }
+
+    /** The iOS facade's `startWorkflowJSON` answer — `{runId, workflowId, alreadyRunning}` — or null without a run id. */
+    fun workflowRun(json: String?): GraineWorkflowRun? {
+        val o = Json.obj(json) ?: return null
+        val runId = str(o["runId"]) ?: return null
+        return GraineWorkflowRun(runId, str(o["workflowId"]), o["alreadyRunning"] == true)
+    }
 
     fun session(json: String?): GraineSession? {
         val o = Json.obj(json) ?: return null

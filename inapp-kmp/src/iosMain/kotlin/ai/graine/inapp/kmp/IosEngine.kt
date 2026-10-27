@@ -32,6 +32,11 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         registrations += facade.calls.observeOutcomes { json -> Bridge.outcome(json)?.let { sink.callOutcome(it) } }
         registrations += facade.calls.observeIncoming { json -> Bridge.incoming(json)?.let { sink.incomingCall(it) } }
         registrations += facade.voice.observe { publishVoice() }
+        // What Graine has proven for this agent: as it stands, then each change (new in the facade in 0.14.4).
+        if (facade.respondsToSelector(OBSERVE_VERIFICATION)) {
+            registrations += facade.observeVerification { json -> sink.verification(Bridge.verification(json)) }
+        }
+        sink.verification(verification)
         // The iOS SDK may have loaded its session already (the app configured it from Swift first).
         Bridge.session(facade.sessionJSON)?.let { sink.session(it) }
         publishTheme()
@@ -64,12 +69,61 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
 
     // ── who, and memory ───────────────────────────────────────────────────
 
-    override fun identify(traits: Map<String, Any?>?, memory: Boolean?) {
+    /**
+     * With a token, the facade's `identifyJSON:…identityToken:`, new in 0.14.4; without one — or with a
+     * GraineInApp from before it, which cannot carry a token — the plain selectors every facade answers
+     * (no token keeps the one held, exactly as `identityToken: nil` does).
+     */
+    override fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?) {
         val json = Bridge.json(traits)
-        if (memory == null) facade.identifyJSON(json) else facade.identifyJSON(json, memory)
+        when {
+            identityToken != null && memory == null && facade.respondsToSelector(IDENTIFY_WITH_TOKEN) ->
+                facade.identifyJSON(json, identityToken = identityToken)
+            identityToken != null && memory != null && facade.respondsToSelector(IDENTIFY_WITH_MEMORY_AND_TOKEN) ->
+                facade.identifyJSON(json, memory = memory, identityToken = identityToken)
+            memory == null -> facade.identifyJSON(json)
+            else -> facade.identifyJSON(json, memory)
+        }
     }
 
     override fun setMemory(enabled: Boolean) = facade.setMemory(enabled)
+
+    // ── your app and your users: the iOS SDK declares the app, runs App Attest and carries the token ──
+    // Each selector is new in the facade in 0.14.4 and asked for before each use: an older GraineInApp proves
+    // nothing, and its verification stays off.
+
+    override fun setIdentityToken(token: String?) {
+        if (facade.respondsToSelector(SET_IDENTITY_TOKEN)) facade.setIdentityToken(token)
+    }
+
+    /** The shared refresher as the facade's block: it hands a completion to call once, from any thread. */
+    override fun setIdentityTokenRefresher(refresher: ((done: (String?) -> Unit) -> Unit)?) {
+        if (!facade.respondsToSelector(SET_IDENTITY_TOKEN_REFRESHER)) return
+        // The binding types the facade's completion as nullable; the facade always hands one.
+        facade.setIdentityTokenRefresher(refresher?.let { r -> { done -> r { token -> done?.invoke(token) } } })
+    }
+
+    /** The facade answers the verdict's word on the main thread; one this build does not know is not proven. */
+    override fun prepareAppVerification(done: (GraineAppVerdict) -> Unit) {
+        if (!facade.respondsToSelector(PREPARE_APP_VERIFICATION)) {
+            done(verification.app)
+            return
+        }
+        facade.prepareAppVerificationWithCompletion { word -> done(GraineAppVerdict.from(word) ?: GraineAppVerdict.UNVERIFIED) }
+    }
+
+    override val verification: GraineVerification
+        get() = if (facade.respondsToSelector(VERIFICATION_JSON)) Bridge.verification(facade.verificationJSON) else GraineVerification()
+
+    override var debugTokenMode: GraineDebugTokenMode
+        get() = if (facade.respondsToSelector(DEBUG_TOKEN_MODE)) GraineDebugTokenMode.from(facade.debugTokenMode) ?: GraineDebugTokenMode.AUTOMATIC
+            else GraineDebugTokenMode.AUTOMATIC
+        set(value) {
+            if (facade.respondsToSelector(SET_DEBUG_TOKEN_MODE)) facade.debugTokenMode = value.word
+        }
+
+    override val debugToken: String?
+        get() = if (facade.respondsToSelector(DEBUG_TOKEN)) facade.debugToken?.takeIf { it.isNotBlank() } else null
 
     override fun forgetMemory(done: (Result<Int>) -> Unit) = facade.forgetMemoryWithCompletion { deleted, error ->
         if (error != null) done(Result.failure(failure(error))) else done(Result.success(deleted.toInt()))
@@ -94,6 +148,11 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun removeField(name: String) = facade.removeField(name)
     override fun clearScreen(screenId: String?) = facade.clearScreen(screenId)
     override fun track(name: String, data: Map<String, Any?>) = facade.trackEvent(name, Bridge.json(data.takeIf { it.isNotEmpty() }))
+
+    /** The facade's `reportEvent:detail:dataJSON:`, new in 0.14.4: a GraineInApp from before it has no way to speak first, and drops it. */
+    override fun reportEvent(name: String, detail: String?, data: Map<String, Any?>) {
+        if (facade.respondsToSelector(REPORT_EVENT)) facade.reportEvent(name, detail, Bridge.json(data.takeIf { it.isNotEmpty() }))
+    }
     override fun tap(name: String) = facade.tap(name)
     override fun noteInteraction() = facade.noteInteraction()
 
@@ -115,6 +174,17 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
                 error != null -> done(Result.failure(failure(error)))
                 call != null -> done(Result.success(call))
                 else -> done(Result.failure(GraineException(GraineErrorCode.Unavailable, "The booking was accepted but not described.")))
+            }
+        }
+
+    /** The iOS SDK's `startWorkflow`, through the facade: the data as JSON, so a number stays a number and a yes a yes. */
+    override fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: (Result<GraineWorkflowRun>) -> Unit) =
+        facade.startWorkflowJSON(workflow, if (data.isEmpty()) null else Json.write(data), idempotencyKey) { json, error ->
+            val run = if (error == null) Bridge.workflowRun(json) else null
+            when {
+                error != null -> done(Result.failure(failure(error)))
+                run != null -> done(Result.success(run))
+                else -> done(Result.failure(GraineException(GraineErrorCode.Unavailable, "The workflow was started, but its run id did not come back.")))
             }
         }
 
@@ -331,6 +401,7 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     companion object {
         // The booking sheet's selectors, new in the facade after 0.7.0 (asked for before each use).
         private val BOOKING_AVAILABLE = NSSelectorFromString("bookingAvailable")
+        private val REPORT_EVENT = NSSelectorFromString("reportEvent:detail:dataJSON:")
         private val PRESENT_BOOKING = NSSelectorFromString("presentBookingWithReason:completion:")
         // New in the facade after 0.8.0 (asked for before each use).
         private val CHAT_CLEAR = NSSelectorFromString("clear")
@@ -361,6 +432,17 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val SESSION_TRANSCRIPT = NSSelectorFromString("sessionTranscriptJSONWithId:completion:")
         private val CLOSE_DELAY = NSSelectorFromString("closeDelaySeconds")
         private val SET_CLOSE_DELAY = NSSelectorFromString("setCloseDelaySeconds:")
+        // Your app and your users, new in the facade in 0.14.4 (asked for before each use).
+        private val IDENTIFY_WITH_TOKEN = NSSelectorFromString("identifyJSON:identityToken:")
+        private val IDENTIFY_WITH_MEMORY_AND_TOKEN = NSSelectorFromString("identifyJSON:memory:identityToken:")
+        private val SET_IDENTITY_TOKEN = NSSelectorFromString("setIdentityToken:")
+        private val SET_IDENTITY_TOKEN_REFRESHER = NSSelectorFromString("setIdentityTokenRefresher:")
+        private val PREPARE_APP_VERIFICATION = NSSelectorFromString("prepareAppVerificationWithCompletion:")
+        private val VERIFICATION_JSON = NSSelectorFromString("verificationJSON")
+        private val OBSERVE_VERIFICATION = NSSelectorFromString("observeVerification:")
+        private val DEBUG_TOKEN_MODE = NSSelectorFromString("debugTokenMode")
+        private val SET_DEBUG_TOKEN_MODE = NSSelectorFromString("setDebugTokenMode:")
+        private val DEBUG_TOKEN = NSSelectorFromString("debugToken")
         private val OLD_IOS_SDK_PAST_SESSIONS =
             "This app links a GraineInApp without past sessions. Link GraineInApp ${GraineKmpVersion.NAME}, the version of this library."
         private val OLD_IOS_SDK =
@@ -375,9 +457,17 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
             reason = c.reason,
         )
 
-        /** The facade's NSError: its code word in `userInfo["code"]`, its sentence as the description, a rate limit's wait in `userInfo["retryAfterSeconds"]`. */
+        /**
+         * The facade's NSError: its code word in `userInfo["code"]`, its sentence as the description, a rate limit's
+         * wait in `userInfo["retryAfterSeconds"]`, and the server's one-word reason in `userInfo["reason"]`.
+         */
         internal fun failure(error: NSError): GraineException =
-            Bridge.error(error.userInfo["code"] as? String, error.localizedDescription, whole(error.userInfo["retryAfterSeconds"]))
+            Bridge.error(
+                error.userInfo["code"] as? String,
+                error.localizedDescription,
+                whole(error.userInfo["retryAfterSeconds"]),
+                error.userInfo["reason"] as? String,
+            )
 
         /** A number from Foundation: an NSNumber made in Swift stays one; one made in Kotlin comes back as a Kotlin number. */
         private fun whole(v: Any?): Int? = when (v) {

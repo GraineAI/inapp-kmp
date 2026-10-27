@@ -130,6 +130,38 @@ class GraineApiTest {
     }
 
     @Test
+    fun aWorkflowStartGoesToThePlatformSdkAsAskedAndAnswersTheRun() = runTest {
+        val fake = configured()
+        fake.workflowAnswer = Result.success(GraineWorkflowRun("oex_1", "owf_1", alreadyRunning = true))
+        assertEquals(GraineWorkflowRun("oex_1", "owf_1", true), Graine.startWorkflow("Welcome call", mapOf("plan" to "gold"), "order-1042:welcome"))
+        assertEquals(Triple("Welcome call", mapOf<String, Any?>("plan" to "gold"), "order-1042:welcome"), fake.workflowStarts.single())
+        // The platform SDK decides the checks, the key and its one retry: what the app passed goes as it was.
+        Graine.startWorkflow("Welcome call")
+        assertEquals(Triple("Welcome call", emptyMap<String, Any?>(), null), fake.workflowStarts.last())
+    }
+
+    @Test
+    fun aRefusedWorkflowStartIsTheServersCode() = runTest {
+        val fake = configured()
+        for ((wire, code) in listOf("not_allowed" to GraineErrorCode.NotAllowed, "not_verified" to GraineErrorCode.NotVerified,
+                                    "identity_required" to GraineErrorCode.IdentityRequired, "rate_limited" to GraineErrorCode.RateLimited)) {
+            fake.workflowAnswer = Result.failure(Bridge.error(wire, "No.", retryAfterSeconds = 600))
+            val e = assertFailsWith<GraineException> { Graine.startWorkflow("Welcome call") }
+            assertEquals(code, e.code)
+            assertEquals(600, e.retryAfterSeconds)
+        }
+        assertEquals(GraineErrorCode.NotVerified, GraineErrorCode.from(" NOT_VERIFIED "))
+    }
+
+    @Test
+    fun theFacadesWorkflowAnswerIsReadOrIsNoRun() {
+        assertEquals(GraineWorkflowRun("oex_1", "owf_1", true), Bridge.workflowRun("""{"runId":"oex_1","workflowId":"owf_1","alreadyRunning":true}"""))
+        assertEquals(GraineWorkflowRun("oex_1", null, false), Bridge.workflowRun("""{"runId":"oex_1","workflowId":null}"""))
+        assertEquals(null, Bridge.workflowRun("""{"workflowId":"owf_1"}"""))
+        assertEquals(null, Bridge.workflowRun(null))
+    }
+
+    @Test
     fun memoriesComeBackNewestFirstAsTheyCame() = runTest {
         val a = GraineMemory("m2", "Takes metformin at 8 pm", Instant.parse("2026-10-13T10:00:00Z"))
         val b = GraineMemory("m1", "Feels dizzy without breakfast", Instant.parse("2026-10-12T10:00:00Z"))
@@ -236,12 +268,15 @@ class GraineApiTest {
     // ── scheduling ────────────────────────────────────────────────────────
 
     @Test
-    fun aBookingWaitsForTheSessionThenChecksItsRules() = runTest {
+    fun aBookingAskedBeforeTheSessionGoesToThePlatformAtOnceWhichKeepsWhoAsked() = runTest {
         configured()
+        Graine.identify(mapOf("user_id" to "u-1"))
         val at = Clock.System.now() + 2.hours
         val booking = async { Graine.scheduleCall(at, "  Weekly check-in  ") }
         runCurrent()
-        assertTrue(engine.scheduled.isEmpty(), "nothing is sent before the session says booking is allowed")
+        // The platform SDK waits for the session, checks its rules and refuses a user replaced meanwhile (0.14.4):
+        // held here first, the booking would reach it only after a switch, as the next user's.
+        assertEquals(listOf<Pair<Instant, String?>>(at to "Weekly check-in"), engine.scheduled.toList(), "handed over at once, as asked")
         engine.sink.session(bookingSession())
         val call = booking.await()
         assertEquals("sc_1", call.id)
@@ -303,11 +338,11 @@ class GraineApiTest {
     }
 
     @Test
-    fun aSessionThatNeverArrivesIsWaitedForAtMostTwentySeconds() = runTest {
+    fun aSessionThatNeverArrivesLeavesTheWaitToThePlatform() = runTest {
         configured()
         val booking = async { Graine.scheduleCall(Clock.System.now() + 3.hours) }
-        advanceUntilIdle()
-        assertEquals(1, engine.scheduled.size, "after the wait, the platform decides")
+        runCurrent()
+        assertEquals(1, engine.scheduled.size, "the platform SDK waits for the session, bounded by its own timeouts, and decides")
         booking.await()
     }
 
@@ -581,7 +616,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.14.3", GraineKmpVersion.NAME)
+        assertEquals("0.14.4", GraineKmpVersion.NAME)
     }
 
     @Test

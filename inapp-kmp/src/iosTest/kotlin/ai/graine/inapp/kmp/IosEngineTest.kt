@@ -47,6 +47,8 @@ class IosEngineTest {
         override fun voice(info: GraineVoiceInfo) { voice = info }
         var theme: GraineThemeTokens? = null
         override fun theme(tokens: GraineThemeTokens?) { theme = tokens }
+        val verifications = mutableListOf<GraineVerification>()
+        override fun verification(verification: GraineVerification) { verifications += verification }
     }
 
     companion object {
@@ -78,7 +80,7 @@ class IosEngineTest {
     @Test
     fun theFacadeTakesEverythingTheSharedCodeSends() {
         assertTrue(engine.installId.length >= 16, "an install id: ${engine.installId}")
-        engine.identify(mapOf("user_id" to "u-1", "name" to "Riya", "age" to 41), memory = false)
+        engine.identify(mapOf("user_id" to "u-1", "name" to "Riya", "age" to 41), memory = false, identityToken = null)
         assertFalse(engine.memoryEnabled)
         engine.setMemory(true)
         assertTrue(engine.memoryEnabled)
@@ -93,7 +95,7 @@ class IosEngineTest {
         engine.clearScreen("kyc")
         val unregister = engine.registerAction("open_screen") { _, answer -> answer(GraineActionResult.ok("Opened.")) }
         unregister()
-        engine.identify(null, null)
+        engine.identify(null, null, null)
         spinUntil { heard.chat != null && heard.calls != null && heard.voice != null }
         assertEquals(GraineChatStatus.IDLE, heard.chat?.second)
         assertEquals(GraineCallState.IDLE, heard.calls?.state)
@@ -102,12 +104,14 @@ class IosEngineTest {
 
     @Test
     fun aRefusalArrivesAsTheTypedError() {
-        engine.identify(null, null)
+        engine.identify(null, null, null)
         var result: Result<List<GraineMemory>>? = null
         engine.memories { result = it }
         spinUntil { result != null }
         val error = result?.exceptionOrNull() as? GraineException
-        assertEquals(GraineErrorCode.IdentityRequired, error?.code, "nobody signed in: ${result}")
+        // 0.14.4: memories() waits for the agent's settings (they name the trait that identifies the user), and a
+        // name that never resolves loads none — the refusal is that session's own reason, typed, never a guess.
+        assertEquals(GraineErrorCode.Network, error?.code, "the session could not load: ${result}")
         // The session could not load from a name that never resolves, and the shared code was told.
         spinUntil { heard.failures.isNotEmpty() }
         assertTrue(heard.failures.isNotEmpty())
@@ -115,12 +119,12 @@ class IosEngineTest {
     }
 
     @Test
-    fun aBookingIsCheckedOnTheDeviceAndACancelWithNoAnswerIsANetworkError() {
+    fun aBookingAndACancelWithNoSettingsOrAnswerAreNetworkErrors() {
         var result: Result<GraineScheduledCall>? = null
         engine.scheduleCall(Clock.System.now() + 2.hours, "Weekly check-in") { result = it }
         spinUntil { result != null }
-        // No session could load, so the agent's rules are the defaults: nobody may book. Nothing was sent.
-        assertEquals(GraineErrorCode.SchedulingOff, (result?.exceptionOrNull() as? GraineException)?.code, "refused on the device: ${result}")
+        // No session could load: 0.14.4 hands on that reason — never `SchedulingOff` from rules that were never read.
+        assertEquals(GraineErrorCode.Network, (result?.exceptionOrNull() as? GraineException)?.code, "the session could not load: ${result}")
         var cancelled: Result<GraineCallStatus>? = null
         engine.cancelScheduledCall("sc_1") { cancelled = it }
         spinUntil { cancelled != null }
@@ -144,7 +148,7 @@ class IosEngineTest {
 
     @Test
     fun aNewConversationWithNobodySignedInClearsTheChat() {
-        engine.identify(null, null)
+        engine.identify(null, null, null)
         engine.chatSend("Before the new conversation")
         spinUntil { heard.chat?.first?.isNotEmpty() == true }
         var result: Result<Unit>? = null
@@ -232,5 +236,72 @@ class IosEngineTest {
         engine.voiceSetMuted(true)
         spinUntil { heard.voice?.muted == true }
         assertTrue(heard.voice?.muted == true)
+    }
+
+    // ── your app and your users (0.14.4), through the facade's own selectors ──
+
+    private val contract: Map<String, Any?> by lazy { Json.obj(APP_IDENTITY_JSON) ?: error("app-identity.json is not JSON") }
+
+    @Test
+    fun theTokenAndTheRefresherReachTheFacade() {
+        val facade = assertNotNull(GraineObjC.named("default"))
+        val token = ((contract["identityWire"] as Map<*, *>)["identity"] as Map<*, *>)["token"] as String
+        // identifyJSON:identityToken: and identifyJSON:memory:identityToken:, then the plain selectors without one.
+        engine.identify(mapOf("user_id" to "user-123"), null, token)
+        engine.identify(mapOf("user_id" to "user-123"), true, token)
+        engine.setIdentityToken("a-fresh-token")
+        engine.setIdentityToken(null)
+        engine.identify(null, null, null)
+        // The refresher is the facade's to hold — the iOS SDK asks it when a token runs out, never here.
+        assertFalse(facade.hasIdentityTokenRefresher)
+        engine.setIdentityTokenRefresher(IdentityTokens.bridge({ "a-fresh-token" }))
+        assertTrue(facade.hasIdentityTokenRefresher)
+        engine.setIdentityTokenRefresher(null)
+        assertFalse(facade.hasIdentityTokenRefresher)
+    }
+
+    @Test
+    fun withNoSettingsNothingIsAskedAndPreparingTheAppSaysOff() {
+        // The host never resolves: no agent settings, so the agent asks nothing of this app or its user.
+        assertEquals(GraineVerification(), engine.verification)
+        assertEquals(GraineVerification(), heard.verifications.firstOrNull(), "reported at start, as it stands")
+        var verdict: GraineAppVerdict? = null
+        engine.prepareAppVerification { verdict = it }
+        spinUntil(35) { verdict != null }
+        assertEquals(GraineAppVerdict.OFF, verdict, "prepareAppVerificationWithCompletion: answered once the settings could not load")
+    }
+
+    @Test
+    fun developmentModeRoundTripsAndTheSimulatorHasADebugToken() {
+        val facade = assertNotNull(GraineObjC.named("default"))
+        val shape = Regex((contract["shapes"] as Map<*, *>)["debugToken"] as String)
+        assertEquals(GraineDebugTokenMode.AUTOMATIC, engine.debugTokenMode, "the iOS SDK's default")
+        // The Simulator is a debug build (the native SDK's answer): in automatic mode this install has a debug token.
+        val token = engine.debugToken
+        assertTrue(token != null && shape.matches(token), "a debug token of the contract's shape")
+        for (mode in GraineDebugTokenMode.entries) {
+            engine.debugTokenMode = mode
+            assertEquals(mode, engine.debugTokenMode)
+            assertEquals(mode.word, facade.debugTokenMode)
+        }
+        assertNull(engine.debugToken, "never: no debug token, even on the Simulator")
+        engine.debugTokenMode = GraineDebugTokenMode.ALWAYS
+        assertEquals(token, engine.debugToken, "one token per install")
+        engine.debugTokenMode = GraineDebugTokenMode.AUTOMATIC
+    }
+
+    @Test
+    fun theNewRefusalsArriveTypedFromTheFacadesErrors() {
+        for (c in (contract["errorCodes"] as List<*>).map { it as Map<*, *> }) {
+            val wire = c["wire"] as String
+            val error = NSError.errorWithDomain(
+                "ai.graine.inapp", 403, mapOf<Any?, Any?>("code" to wire, NSLocalizedDescriptionKey to "Graine refused it."),
+            )
+            val e = IosEngine.failure(error)
+            assertEquals(GraineErrorCode.from(wire), e.code)
+            assertEquals(wire, e.code.wire)
+            assertFalse(e.code is GraineErrorCode.Unknown, wire)
+            assertEquals("Graine refused it.", e.message)
+        }
     }
 }

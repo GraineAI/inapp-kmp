@@ -2,7 +2,7 @@ package ai.graine.inapp.kmp
 
 /** This library's version: what it says it is, the same on Android and iOS. */
 object GraineKmpVersion {
-    const val NAME = "0.14.3"
+    const val NAME = "0.14.4"
 }
 
 /**
@@ -55,6 +55,18 @@ data class GraineConfig(
      * needs the GraineInApp of this version. New in 0.14.3.
      */
     val chatCloseDelaySeconds: Int = 15,
+    /**
+     * Server tokens (optional — the strongest mode): returns a fresh token from
+     * YOUR server, which mints it with `POST /v2/client-tokens` and your secret
+     * API key, or null when none can be had right now (throwing counts as null).
+     * Called at start, again shortly before the token expires (in the
+     * background, with jitter, retried with backoff), and when Graine refuses
+     * a token; every request to Graine then carries it. A token that expires
+     * never ends a live chat or call — only new conversations wait for a fresh
+     * one. Needed once the agent's "Require server tokens" is enforced; null,
+     * the default, sends none. New in 0.14.4.
+     */
+    val tokenProvider: (suspend () -> String?)? = null,
 )
 
 /** How the voice bar's audio travels. */

@@ -2,6 +2,11 @@ package ai.graine.inapp.kmp
 
 import ai.graine.inapp.ActionResult
 import ai.graine.inapp.FrictionSignal
+import ai.graine.inapp.GraineAppVerdictCallback
+import ai.graine.inapp.GraineDebugTokenMode as NativeDebugTokenMode
+import ai.graine.inapp.GraineIdentityTokenRefresher
+import ai.graine.inapp.GraineVerification as NativeVerification
+import ai.graine.inapp.GraineVerificationListener
 import ai.graine.inapp.GraineCall
 import ai.graine.inapp.GraineCallConnection as NativeCallConnection
 import ai.graine.inapp.GraineCallListener
@@ -30,6 +35,7 @@ import ai.graine.inapp.GrainePastSessions as NativePastSessions
 import ai.graine.inapp.GraineSessionTranscript as NativeSessionTranscript
 import ai.graine.inapp.GraineQuickReply as NativeQuickReply
 import ai.graine.inapp.GraineScheduledCall as NativeScheduledCall
+import ai.graine.inapp.GraineWorkflowRun as NativeWorkflowRun
 import ai.graine.inapp.GraineSchedulingRules as NativeRules
 import ai.graine.inapp.GraineScreen as NativeScreen
 import ai.graine.inapp.GraineWidget
@@ -69,6 +75,8 @@ class AndroidEngineTest {
         var voice: GraineVoiceInfo? = null
         val themes = mutableListOf<GraineThemeTokens?>()
         override fun theme(tokens: GraineThemeTokens?) { themes += tokens }
+        val verifications = mutableListOf<GraineVerification>()
+        override fun verification(verification: GraineVerification) { verifications += verification }
         override fun session(session: GraineSession) { sessions += session }
         override fun sessionFailed(message: String) { failures += message }
         override fun event(event: GraineEvent) { events += event }
@@ -99,6 +107,8 @@ class AndroidEngineTest {
         var scheduleDone: GraineCallback<NativeScheduledCall>? = null
         var listDone: GraineCallback<List<NativeScheduledCall>>? = null
         var cancelDone: GraineCallback<NativeCallStatus>? = null
+        var workflowArgs: Triple<String, Map<String, Any?>, String?>? = null
+        var workflowDone: GraineCallback<NativeWorkflowRun>? = null
         var callsConfig: NativeCallsConfig? = null
         var startedFrom: Activity? = null
         var callBackArgs: Pair<String?, String?>? = null
@@ -110,8 +120,25 @@ class AndroidEngineTest {
         override var session: SessionConfig? = null
         override var themeTokensJson: String? = null
         override fun addListener(listener: GraineListener) { listeners += listener }
-        override fun identify(traits: Map<String, Any?>?, memory: Boolean?) { did += "identify:$traits:$memory" }
+        /** The identity token each identify carried, in order (null: none given). */
+        val identifyTokens = mutableListOf<String?>()
+        override fun identify(traits: Map<String, Any?>?, memory: Boolean?, identityToken: String?) {
+            did += "identify:$traits:$memory"
+            identifyTokens += identityToken
+        }
         override fun setMemory(enabled: Boolean) { did += "setMemory:$enabled" }
+        // Your app and your users, as GraineInApp holds them.
+        val tokensSet = mutableListOf<String?>()
+        override fun setIdentityToken(token: String?) { tokensSet += token; did += "setIdentityToken" }
+        var refresher: GraineIdentityTokenRefresher? = null
+        override fun setIdentityTokenRefresher(refresher: GraineIdentityTokenRefresher?) { this.refresher = refresher; did += "refresher:${refresher != null}" }
+        var prepareDone: GraineAppVerdictCallback? = null
+        override fun prepareAppVerification(done: GraineAppVerdictCallback) { prepareDone = done; did += "prepareAppVerification" }
+        override var verification = NativeVerification()
+        val verificationListeners = mutableListOf<GraineVerificationListener>()
+        override fun addVerificationListener(listener: GraineVerificationListener) { verificationListeners += listener }
+        override var debugTokenMode = NativeDebugTokenMode.AUTOMATIC
+        override var debugToken: String? = null
         override fun forgetMemory(done: GraineCallback<Int>) { forget = done }
         override fun memories(done: GraineCallback<List<NativeMemory>>) { memoriesDone = done }
         override fun setVariables(values: Map<String, Any?>?) { did += "setVariables:$values" }
@@ -122,6 +149,7 @@ class AndroidEngineTest {
         override fun removeField(name: String) { did += "removeField:$name" }
         override fun clearScreen(screenId: String?) { did += "clearScreen:$screenId" }
         override fun track(name: String, data: Map<String, Any?>) { did += "track:$name:$data" }
+        override fun reportEvent(name: String, detail: String?, data: Map<String, Any?>) { did += "reportEvent:$name:$detail:$data" }
         override fun tap(name: String) { did += "tap:$name" }
         override fun noteInteraction() { did += "noteInteraction" }
         override fun registerDeferredAction(name: String, handler: (args: JSONObject, answer: (ActionResult) -> Unit) -> Unit): () -> Unit {
@@ -131,6 +159,9 @@ class AndroidEngineTest {
         override fun scheduleCall(at: Date, reason: String?, done: GraineCallback<NativeScheduledCall>) { scheduleArgs = at to reason; scheduleDone = done }
         override fun scheduledCalls(done: GraineCallback<List<NativeScheduledCall>>) { listDone = done }
         override fun cancelScheduledCall(id: String, done: GraineCallback<NativeCallStatus>) { did += "cancel:$id"; cancelDone = done }
+        override fun startWorkflow(workflow: String, data: Map<String, Any?>, idempotencyKey: String?, done: GraineCallback<NativeWorkflowRun>) {
+            workflowArgs = Triple(workflow, data, idempotencyKey); workflowDone = done
+        }
         override var bookingAvailable = false
         override var bookingUnavailableReason: String? = "not_identified"
         var slotsAskedFor: Date? = null
@@ -336,7 +367,7 @@ class AndroidEngineTest {
     @Test
     fun callsReachTheSdkAsItsOwnTypes() {
         start()
-        engine.identify(mapOf("patient_id" to "MRN-1"), false)
+        engine.identify(mapOf("patient_id" to "MRN-1"), false, null)
         engine.setMemory(true)
         engine.setScreen(
             GraineScreen(
@@ -434,6 +465,32 @@ class AndroidEngineTest {
         engine.presentBooking(null) { heard = it }
         port.bookingDone!!.onResult(null, null)
         assertNull("closed without booking", heard!!.getOrThrow())
+    }
+
+    // ── workflows the app starts ──────────────────────────────────────────
+
+    @Test
+    fun aWorkflowStartGoesToTheAndroidSdkAndItsAnswerComesBackAsTheSharedTypes() {
+        start()
+        var started: Result<GraineWorkflowRun>? = null
+        engine.startWorkflow("Welcome call", mapOf("plan" to "gold"), "order-1042:welcome") { started = it }
+        assertEquals(Triple("Welcome call", mapOf<String, Any?>("plan" to "gold"), "order-1042:welcome"), port.workflowArgs)
+        port.workflowDone!!.onResult(NativeWorkflowRun("oex_1", "owf_1", true), null)
+        assertEquals(GraineWorkflowRun("oex_1", "owf_1", true), started!!.getOrThrow())
+
+        for ((native, shared) in listOf(
+            NativeErrorCode.NOT_ALLOWED to GraineErrorCode.NotAllowed, NativeErrorCode.NOT_VERIFIED to GraineErrorCode.NotVerified,
+            NativeErrorCode.IDENTITY_REQUIRED to GraineErrorCode.IdentityRequired, NativeErrorCode.RATE_LIMITED to GraineErrorCode.RateLimited,
+        )) {
+            engine.startWorkflow("Welcome call", emptyMap(), null) { started = it }
+            port.workflowDone!!.onResult(null, GraineError(native, "No.", 60))
+            val e = started!!.exceptionOrNull() as GraineException
+            assertEquals(shared, e.code)
+            assertEquals(60, e.retryAfterSeconds)
+        }
+        engine.startWorkflow("Welcome call", emptyMap(), null) { started = it }
+        port.workflowDone!!.onResult(null, null)
+        assertEquals(GraineErrorCode.Unavailable, (started!!.exceptionOrNull() as GraineException).code)
     }
 
     // ── scheduling ────────────────────────────────────────────────────────
@@ -1207,7 +1264,7 @@ class AndroidEngineTest {
         port.chatNewConversationBefore = listOf("t1")
         port.chatChanged()
         assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
-        engine.identify(mapOf("user_id" to "u-1"), null)
+        engine.identify(mapOf("user_id" to "u-1"), null, null)
         assertTrue(port.did.contains("identify:{user_id=u-1}:null"))
         // What the Android SDK does with it: the connection closed and made again, the user's line kept.
         port.chatConnected = false; port.chatConnecting = true
@@ -1352,7 +1409,7 @@ class AndroidEngineTest {
         port.chatChanged()
         assertEquals(2, heard.past!!.sessions.size)
         // identify() another user: the Android SDK lets the last user's list go and tells its change listeners.
-        engine.identify(mapOf("user_id" to "u-arjun"), null)
+        engine.identify(mapOf("user_id" to "u-arjun"), null, null)
         port.chatPastSessions = NativePastSessions()
         port.chatChanged()
         assertEquals(GrainePastSessions(), heard.past)
@@ -1413,6 +1470,111 @@ class AndroidEngineTest {
         assertEquals(15, AndroidMapping.config(GraineConfig("https://www.graine.ai", "pk_live_test")).chatCloseDelaySeconds)
         for ((asked, kept) in listOf(0 to 0, 40 to 40, -5 to 0, 301 to 300, 1000 to 300)) {
             assertEquals("$asked", kept, AndroidMapping.config(GraineConfig("https://www.graine.ai", "pk_live_test", chatCloseDelaySeconds = asked)).chatCloseDelaySeconds)
+        }
+    }
+
+    // ── your app and your users: the Android SDK declares the app, runs Play Integrity and carries the token ──
+
+    @Test
+    fun identifyCarriesTheTokenToTheAndroidSdkAndAnAccountChangeCarriesNone() {
+        start()
+        engine.identify(mapOf("user_id" to "user-123"), null, "6c249fec755515370f7f8bbc1ea341f1a9b2a40d62d1be9480ae9dece9c103a8")
+        engine.identify(mapOf("user_id" to "user-123", "name" to "Asha"), null, null)
+        engine.identify(null, null, null)
+        engine.identify(mapOf("user_id" to "user-456"), false, null)
+        assertEquals(
+            listOf("identify:{user_id=user-123}:null", "identify:{user_id=user-123, name=Asha}:null", "identify:null:null", "identify:{user_id=user-456}:false"),
+            port.did,
+        )
+        assertEquals(listOf("6c249fec755515370f7f8bbc1ea341f1a9b2a40d62d1be9480ae9dece9c103a8", null, null, null), port.identifyTokens)
+        // A token for the user identified now, replaced and cleared.
+        engine.setIdentityToken("fresh")
+        engine.setIdentityToken(null)
+        assertEquals(listOf("fresh", null), port.tokensSet)
+    }
+
+    @Test
+    fun theSharedRefresherIsTheAndroidSdksFunInterfaceAnsweredOnce() {
+        start()
+        // The Android SDK calls it on the main thread and takes the first answer: the bridge answers once, whatever happens.
+        val answers = mutableListOf<String?>()
+        engine.setIdentityTokenRefresher(IdentityTokens.bridge({ "fresh-token" }))
+        port.refresher!!.refresh { answers += it }
+        engine.setIdentityTokenRefresher(IdentityTokens.bridge({ throw IllegalStateException("The token service is down.") }))
+        port.refresher!!.refresh { answers += it }
+        engine.setIdentityTokenRefresher(IdentityTokens.bridge({ null }))
+        port.refresher!!.refresh { answers += it }
+        assertEquals(listOf("fresh-token", null, null), answers)
+        engine.setIdentityTokenRefresher(null)
+        assertNull(port.refresher)
+        assertEquals(listOf("refresher:true", "refresher:true", "refresher:true", "refresher:false"), port.did)
+    }
+
+    @Test
+    fun prepareAppVerificationHearsEveryVerdictTheAndroidSdkComesTo() {
+        start()
+        val heardVerdicts = mutableListOf<GraineAppVerdict>()
+        for (native in ai.graine.inapp.GraineAppVerdict.values()) {
+            engine.prepareAppVerification { heardVerdicts += it }
+            port.prepareDone!!.onVerdict(native)
+        }
+        assertEquals(GraineAppVerdict.entries.toList(), heardVerdicts)
+        assertEquals(ai.graine.inapp.GraineAppVerdict.values().map { it.word }, heardVerdicts.map { it.word })
+    }
+
+    @Test
+    fun theVerificationIsTheAndroidSdksAtStartThenAsItChanges() {
+        port.verification = NativeVerification(ai.graine.inapp.GraineAppVerdict.CHECKING)
+        start()
+        assertEquals(listOf(GraineVerification(app = GraineAppVerdict.CHECKING)), heard.verifications)
+        val listener = port.verificationListeners.single()
+        listener.onVerification(
+            NativeVerification(ai.graine.inapp.GraineAppVerdict.UNVERIFIED, "debug_token_unknown", ai.graine.inapp.GraineUserVerdict.INVALID, "expired"),
+        )
+        listener.onVerification(NativeVerification(ai.graine.inapp.GraineAppVerdict.DEBUG_TOKEN, null, ai.graine.inapp.GraineUserVerdict.TEST_USER, " "))
+        assertEquals(
+            listOf(
+                GraineVerification(app = GraineAppVerdict.CHECKING),
+                GraineVerification(GraineAppVerdict.UNVERIFIED, "debug_token_unknown", GraineUserVerdict.INVALID, "expired"),
+                GraineVerification(GraineAppVerdict.DEBUG_TOKEN, null, GraineUserVerdict.TEST_USER, null),
+            ),
+            heard.verifications,
+        )
+        // Read as it stands, too.
+        port.verification = NativeVerification(user = ai.graine.inapp.GraineUserVerdict.VERIFIED)
+        assertEquals(GraineVerification(user = GraineUserVerdict.VERIFIED), engine.verification)
+    }
+
+    @Test
+    fun developmentModeAndTheDebugTokenAreTheAndroidSdks() {
+        start()
+        assertEquals(GraineDebugTokenMode.AUTOMATIC, engine.debugTokenMode)
+        for (mode in GraineDebugTokenMode.entries) {
+            engine.debugTokenMode = mode
+            assertEquals(mode.word, port.debugTokenMode.word)
+            assertEquals(mode, engine.debugTokenMode)
+        }
+        assertNull(engine.debugToken)
+        port.debugToken = "gdt_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5_-"
+        assertEquals("gdt_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5_-", engine.debugToken)
+        port.debugToken = ""
+        assertNull(engine.debugToken)
+    }
+
+    @Test
+    fun theNewRefusalsArriveTypedFromTheAndroidSdk() {
+        start()
+        var got: Result<List<GraineMemory>>? = null
+        for ((native, shared) in listOf(
+            NativeErrorCode.APP_NOT_ALLOWED to GraineErrorCode.AppNotAllowed,
+            NativeErrorCode.APP_NOT_VERIFIED to GraineErrorCode.AppNotVerified,
+            NativeErrorCode.IDENTITY_UNVERIFIED to GraineErrorCode.IdentityUnverified,
+        )) {
+            engine.memories { got = it }
+            port.memoriesDone!!.onResult(null, GraineError(native, "Graine refused it."))
+            val e = got!!.exceptionOrNull() as GraineException
+            assertEquals(shared, e.code)
+            assertEquals("Graine refused it.", e.message)
         }
     }
 }
