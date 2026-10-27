@@ -360,14 +360,31 @@ class GraineAgent internal constructor(
      * reminder")` and the agent opens with its check-in. Paced by the agent:
      * 20 s apart and 3 per conversation by default; [data] may carry
      * `cooldown_seconds`, `max_per_session`, or `quiet = true` to record it
-     * without speaking, and anything else rides along. Dropped when no chat
-     * or call is live — open the chat and wait for [GraineChat.status] ONLINE
-     * first. `track` informs without speaking. On iOS it needs the GraineInApp
-     * of this version (an older one drops it). New in 0.14.4.
+     * without speaking, and anything else rides along. Told to the live
+     * conversation: on iOS a native call with this agent once it is connected
+     * (0.14.5, with the GraineInApp of this version), else the chat, else the
+     * voice bar's call; on Android the voice bar's call, else the chat — a
+     * native call there does not hear it yet. Dropped when none is live —
+     * open the chat and wait for [GraineChat.status] CONNECTED first. `track`
+     * informs without speaking. On iOS it needs the GraineInApp of 0.14.4 or
+     * later (an older one drops it). New in 0.14.4.
+     *
+     * At most [Graine.REPORT_EVENT_MAX_BYTES] (8 KB): the event — name,
+     * detail, the pacing keys and data — as JSON, in UTF-8. A bigger one is
+     * never sent, on any conversation or platform: [events] hears a
+     * [GraineEvent.Error] that says so, with its size (0.14.5). Send an id the
+     * agent can look up, not the record.
      */
     fun reportEvent(name: String, detail: String? = null, data: Map<String, Any?> = emptyMap()) {
         if (name.isBlank()) return
-        engine().reportEvent(name.trim(), detail?.takeIf { it.isNotBlank() }, data)
+        val n = name.trim()
+        val d = detail?.takeIf { it.isNotBlank() }
+        val size = AppEvents.bytes(n, d, data)
+        if (size > AppEvents.MAX_BYTES) {
+            eventFlow.tryEmit(GraineEvent.Error(AppEvents.tooLarge(n, size)))
+            return
+        }
+        engine().reportEvent(n, d, data)
     }
 
     /**
@@ -482,7 +499,7 @@ class GraineAgent internal constructor(
 
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) {
             // A chat that connects again is a new conversation on the server: a component from the last cannot be answered.
-            if (status == GraineChatStatus.ONLINE && chatStatus.value != GraineChatStatus.ONLINE) componentGone()
+            if (status == GraineChatStatus.CONNECTED && chatStatus.value != GraineChatStatus.CONNECTED) componentGone()
             chatTurns.value = turns
             chatStatus.value = status
             chatTyping.value = typing
@@ -515,7 +532,7 @@ class GraineAgent internal constructor(
         }
 
         // The phone has one call engine: one agent reports it for the app (Graine.calls).
-        override fun calls(info: GraineCallInfo) = Graine.callsReported(this@GraineAgent) { Graine.callInfo.value = info }
+        override fun calls(info: GraineCallInfo) = Graine.callsReported(this@GraineAgent) { Graine.publishCall(info) }
         override fun callOutcome(outcome: GraineCallOutcome) = Graine.callsReported(this@GraineAgent) { Graine.callOutcomes.tryEmit(outcome) }
         override fun incomingCall(call: GraineIncomingCall) = Graine.callsReported(this@GraineAgent) { Graine.incomingCalls.tryEmit(call) }
 

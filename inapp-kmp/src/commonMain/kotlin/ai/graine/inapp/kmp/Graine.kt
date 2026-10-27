@@ -37,6 +37,8 @@ object Graine {
 
     // The phone's calls are the app's, whichever agent a call is with. Declared first: the APIs below read them.
     internal val callInfo = MutableStateFlow(GraineCallInfo())
+    /** [GraineCalls.phase]: [callInfo]'s phase, written with it ([publishCall]). */
+    internal val callPhase = MutableStateFlow(GraineCallPhase.IDLE)
     internal val callOutcomes = MutableSharedFlow<GraineCallOutcome>(extraBufferCapacity = 32, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     internal val incomingCalls = MutableSharedFlow<GraineIncomingCall>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
@@ -280,7 +282,7 @@ object Graine {
      * conversation closes quietly (never "Disconnected"), [GraineChat.turns]
      * clears but for a message typed and not yet sent, which is sent next, and
      * the chat connects again at once as the new identity ([GraineChat.status]
-     * CONNECTING, then ONLINE). The same identity with other traits, or another
+     * CONNECTING, then CONNECTED). The same identity with other traits, or another
      * memory choice, changes nothing on the open chat. Identify before showing
      * the chat where you can. On iOS it needs the GraineInApp of this version.
      *
@@ -409,10 +411,20 @@ object Graine {
      * conversation by default; [data] may carry `cooldown_seconds`,
      * `max_per_session`, or `quiet = true` to record without speaking).
      * Dropped when no chat or call is live — open the chat and wait for
-     * [GraineChat.status] ONLINE first. See [GraineAgent.reportEvent]. New in 0.14.4.
+     * [GraineChat.status] CONNECTED first. At most [REPORT_EVENT_MAX_BYTES]
+     * (8 KB) of JSON; a bigger event is never sent and [events] hears why
+     * (0.14.5). See [GraineAgent.reportEvent]. New in 0.14.4.
      */
     fun reportEvent(name: String, detail: String? = null, data: Map<String, Any?> = emptyMap()) =
         defaultAgent.reportEvent(name, detail, data)
+
+    /**
+     * THE MOST AN APP EVENT MAY WEIGH, in bytes: 8 KB (8192) — the event
+     * [reportEvent] sends, `{name, detail, pacing keys, data}`, as JSON in
+     * UTF-8. Graine closes a conversation whose frame passes 32 KB; an event
+     * over this limit is refused before it is sent. New in 0.14.5.
+     */
+    const val REPORT_EVENT_MAX_BYTES: Int = 8_192
 
     /** A tap on a control the agent should know about (`tap:<name>`), for a control the SDK cannot name itself. */
     fun tap(name: String) = primary().engine().tap(name)
@@ -420,11 +432,17 @@ object Graine {
     /** The user did something that is not a field edit (scrolled, opened a picker): the stuck-user clock restarts. */
     fun noteInteraction() = primary().engine().noteInteraction()
 
+    /** The call as the platform reports it, and its phase with it. */
+    internal fun publishCall(info: GraineCallInfo) {
+        callInfo.value = info
+        callPhase.value = info.phase
+    }
+
     /** Back to before configure(): tests only. */
     internal fun reset() {
         lock.locked { holders.values.forEach { it.reset() } }
         callsReporter = null
-        callInfo.value = GraineCallInfo()
+        publishCall(GraineCallInfo())
         speakerByDefault = true
         debugTokenModeChosen = null
         tokenRefresher = null

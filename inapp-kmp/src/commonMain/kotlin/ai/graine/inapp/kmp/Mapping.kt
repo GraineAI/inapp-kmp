@@ -114,12 +114,15 @@ internal fun componentOf(frame: Map<String, Any?>): GraineComponent? {
 /** THE CHAT'S CONNECTION AS ONE WORD, from a platform that reports flags (Android). */
 internal object ChatInference {
     /**
-     * The connection's word, from flags. `reconnecting` is the platform's own:
-     * a drop — or a first try that failed — being made again, as the iOS SDK
-     * says it. `disconnected`: Graine ended the conversation itself (idle, or
-     * its time limit) and nothing is connecting again yet. `ended`: the agent
-     * ended the conversation — not the chat failing, so its closed connection
-     * is IDLE, as React Native and Flutter say it, whatever else is left.
+     * The chat's word, from flags — the contract's rule (PUBLIC-STATE.md §1,
+     * React Native's `chatStatusFrom`), first match wins. `reconnecting` is the
+     * platform's own: a drop — or a first try that failed — being made again,
+     * as the iOS SDK says it. `disconnected`: Graine ended the conversation
+     * itself (idle, or its time limit) and nothing is connecting again yet.
+     * `ended`: the agent ended the conversation — not the chat failing, so its
+     * closed connection is IDLE, as React Native and Flutter say it, whatever
+     * else is left. `failed`: it gave up. `waiting`: a message of the user's
+     * waits to go — OFFLINE while nothing connects it.
      */
     fun status(
         connected: Boolean,
@@ -128,14 +131,19 @@ internal object ChatInference {
         reconnecting: Boolean,
         disconnected: Boolean = false,
         ended: Boolean = false,
+        waiting: Boolean = false,
     ): GraineChatStatus = when {
-        connected -> GraineChatStatus.ONLINE
+        connected -> GraineChatStatus.CONNECTED
         connecting -> if (reconnecting) GraineChatStatus.RECONNECTING else GraineChatStatus.CONNECTING
         disconnected -> GraineChatStatus.DISCONNECTED
         ended -> GraineChatStatus.IDLE
-        failed -> GraineChatStatus.OFFLINE
+        failed -> GraineChatStatus.FAILED
+        waiting -> GraineChatStatus.OFFLINE
         else -> GraineChatStatus.IDLE
     }
+
+    /** A message of the user's still waiting to go, among [turns]. */
+    fun waiting(turns: List<GraineChatTurn>): Boolean = turns.any { it.role == GraineRole.USER && it.delivery == GraineDelivery.SENDING }
 }
 
 /**
@@ -322,20 +330,21 @@ internal object Bridge {
 
     fun chat(json: String?): Chat {
         val o = Json.obj(json) ?: return Chat(emptyList(), GraineChatStatus.IDLE, false)
-        val status = when ((o["status"] as? String)?.lowercase()) {
-            "connecting" -> GraineChatStatus.CONNECTING
-            "online" -> GraineChatStatus.ONLINE
-            "reconnecting" -> GraineChatStatus.RECONNECTING
-            // The agent ending the conversation is not the chat failing ([ChatInference.status]): idle, as every SDK says it.
-            "offline" -> if (o["ended"] == true) GraineChatStatus.IDLE else GraineChatStatus.OFFLINE
-            "disconnected" -> GraineChatStatus.DISCONNECTED
-            else -> GraineChatStatus.IDLE
-        }
         val turns = (o["turns"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { t -> turn(t) } }
+        // The iOS SDK of 0.14.5 says the chat's status in every SDK's words (`phase`); an older one, in its own (`status`).
+        val status = GraineChatStatus.of(o["phase"] as? String) ?: when ((o["status"] as? String)?.lowercase()) {
+            "connecting" -> GraineChatStatus.CONNECTING
+            "online" -> GraineChatStatus.CONNECTED
+            "reconnecting" -> GraineChatStatus.RECONNECTING
+            // A chat that gave up — its chat window's "Not connected" with a tap to try again. The agent ending the
+            // conversation is not the chat failing ([ChatInference.status]): idle, as every SDK says it.
+            "offline" -> if (o["ended"] == true) GraineChatStatus.IDLE else GraineChatStatus.FAILED
+            "disconnected" -> GraineChatStatus.DISCONNECTED
+            // In the chat with a message waiting and nothing connecting it: offline, as every SDK says it.
+            else -> if (o["open"] == true && ChatInference.waiting(turns)) GraineChatStatus.OFFLINE else GraineChatStatus.IDLE
+        }
         val upcoming = (o["upcomingCalls"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let { c -> scheduledCall(c) } }
-        // The iOS SDK says a chat that gave up as `offline` — its chat window's "Not connected" with a tap to try again —
-        // never for one the agent ended (idle above) or Graine closed (`disconnected`).
-        return Chat(turns, status, o["typing"] == true, upcoming, chatExtras(o).copy(failed = status == GraineChatStatus.OFFLINE))
+        return Chat(turns, status, o["typing"] == true, upcoming, chatExtras(o).copy(failed = status == GraineChatStatus.FAILED))
     }
 
     /**

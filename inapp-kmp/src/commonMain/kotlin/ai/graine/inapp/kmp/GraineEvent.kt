@@ -44,3 +44,44 @@ sealed class GraineEvent {
     /** Loud for you, invisible to the user: a misconfigured agent is never the user's problem. */
     data class Error(val message: String) : GraineEvent()
 }
+
+/**
+ * AN APP EVENT AS IT IS SENT, and the most it may weigh (PUBLIC-STATE.md §8):
+ * `{name, detail?, cooldown_seconds?, max_per_session?, quiet?, data?}` — the
+ * pacing keys at the event's own level, everything else of the app's under
+ * `data` (a `data` map of its own first), as the platform SDKs build it — and
+ * its size as JSON, in UTF-8 bytes.
+ */
+internal object AppEvents {
+    /** 8 KB: Graine closes a conversation whose frame passes 32 KB. */
+    const val MAX_BYTES = 8_192
+
+    private val PACING = setOf("cooldown_seconds", "max_per_session", "quiet")
+
+    fun event(name: String, detail: String?, data: Map<String, Any?>): Map<String, Any?> {
+        val out = LinkedHashMap<String, Any?>()
+        out["name"] = name
+        if (!detail.isNullOrEmpty()) out["detail"] = detail
+        val rest = LinkedHashMap<String, Any?>()
+        for (key in data.keys.sorted()) {
+            when {
+                key in PACING -> out[key] = data[key]
+                key != "data" -> rest[key] = data[key]
+            }
+        }
+        val inner = LinkedHashMap<String, Any?>()
+        (data["data"] as? Map<*, *>)?.forEach { (k, v) -> inner[k.toString()] = v }
+        for ((k, v) in rest) if (k !in inner) inner[k] = v
+        if (inner.isNotEmpty()) out["data"] = inner
+        return out
+    }
+
+    /** The event as JSON, in UTF-8 bytes. */
+    fun bytes(name: String, detail: String?, data: Map<String, Any?>): Int =
+        Json.write(event(name, detail, data)).encodeToByteArray().size
+
+    /** What an event over the limit says. */
+    fun tooLarge(name: String, bytes: Int): String =
+        "reportEvent(\"${name.take(64)}\") was not sent: the event is $bytes bytes as JSON, over the limit of $MAX_BYTES (8 KB). " +
+            "Send less in its data — an id the agent can look up, not the record."
+}

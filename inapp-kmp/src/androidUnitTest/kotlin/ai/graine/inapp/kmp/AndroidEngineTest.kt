@@ -565,11 +565,11 @@ class AndroidEngineTest {
         assertEquals("Pick one", component.title)
 
         port.chatConnecting = false; port.chatConnected = true; port.chatChanged()
-        assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
+        assertEquals(GraineChatStatus.CONNECTED, heard.chat!!.second)
         port.chatConnected = false; port.chatConnecting = true; port.chatReconnecting = true; port.listeners.single().onChatState(false, true)
         assertEquals(GraineChatStatus.RECONNECTING, heard.chat!!.second)
         port.chatConnecting = false; port.chatReconnecting = false; port.chatFailed = true; port.chatChanged()
-        assertEquals(GraineChatStatus.OFFLINE, heard.chat!!.second)
+        assertEquals("it gave up: FAILED (0.14.5), where it said OFFLINE", GraineChatStatus.FAILED, heard.chat!!.second)
     }
 
     @Test
@@ -578,7 +578,7 @@ class AndroidEngineTest {
         port.chatConnecting = true; port.chatChanged()
         assertFalse(heard.extras!!.failed)
         port.chatConnecting = false; port.chatFailed = true; port.chatChanged()
-        assertEquals("the status, as before", GraineChatStatus.OFFLINE, heard.chat!!.second)
+        assertEquals("the status says it too (0.14.5)", GraineChatStatus.FAILED, heard.chat!!.second)
         assertTrue("every retry spent", heard.extras!!.failed)
         engine.chatRetry()
         assertEquals(listOf("chatConnect"), port.did)
@@ -1263,7 +1263,7 @@ class AndroidEngineTest {
         )
         port.chatNewConversationBefore = listOf("t1")
         port.chatChanged()
-        assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
+        assertEquals(GraineChatStatus.CONNECTED, heard.chat!!.second)
         engine.identify(mapOf("user_id" to "u-1"), null, null)
         assertTrue(port.did.contains("identify:{user_id=u-1}:null"))
         // What the Android SDK does with it: the connection closed and made again, the user's line kept.
@@ -1277,7 +1277,7 @@ class AndroidEngineTest {
         assertTrue("no marker row left over", heard.extras!!.newConversationBefore.isEmpty())
         port.chatConnecting = false; port.chatConnected = true
         port.chatChanged()
-        assertEquals(GraineChatStatus.ONLINE, heard.chat!!.second)
+        assertEquals(GraineChatStatus.CONNECTED, heard.chat!!.second)
     }
 
     @Test
@@ -1320,7 +1320,7 @@ class AndroidEngineTest {
         port.chatConnected = true
         port.chatEnded = true
         port.chatChanged()
-        assertEquals("held open a moment for the rating", GraineChatStatus.ONLINE, heard.chat!!.second)
+        assertEquals("held open a moment for the rating", GraineChatStatus.CONNECTED, heard.chat!!.second)
         // The server lets it go: the Android SDK does not reconnect, and it is not a failure.
         port.chatConnected = false
         port.chatChanged()

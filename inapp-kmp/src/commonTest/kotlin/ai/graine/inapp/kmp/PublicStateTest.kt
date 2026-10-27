@@ -56,7 +56,7 @@ class PublicStateTest {
         assertEquals(GraineChatStatus.DISCONNECTED, ChatInference.status(connected = false, connecting = false, failed = false, reconnecting = false, disconnected = true))
         assertEquals(GraineChatStatus.DISCONNECTED, ChatInference.status(false, false, failed = true, reconnecting = false, disconnected = true), "said before a give-up")
         assertEquals(GraineChatStatus.CONNECTING, ChatInference.status(false, connecting = true, failed = false, reconnecting = false, disconnected = true), "opening it again connects")
-        assertEquals(GraineChatStatus.OFFLINE, ChatInference.status(false, false, failed = true, reconnecting = false))
+        assertEquals(GraineChatStatus.FAILED, ChatInference.status(false, false, failed = true, reconnecting = false))
         // The iOS facade's word.
         assertEquals(GraineChatStatus.DISCONNECTED, Bridge.chat("""{"turns":[],"status":"disconnected","typing":false}""").status)
     }
@@ -66,30 +66,31 @@ class PublicStateTest {
         val ended = { failed: Boolean -> ChatInference.status(connected = false, connecting = false, failed = failed, reconnecting = false, ended = true) }
         assertEquals(GraineChatStatus.IDLE, ended(false))
         assertEquals(GraineChatStatus.IDLE, ended(true), "the agent saying goodbye is never the chat failing")
-        assertEquals(GraineChatStatus.ONLINE, ChatInference.status(true, false, false, false, ended = true), "the moment held open for a rating")
+        assertEquals(GraineChatStatus.CONNECTED, ChatInference.status(true, false, false, false, ended = true), "the moment held open for a rating")
         assertEquals(GraineChatStatus.CONNECTING, ChatInference.status(false, true, false, false, ended = true), "the next message starts over")
         assertEquals(GraineChatStatus.DISCONNECTED, ChatInference.status(false, false, false, false, disconnected = true, ended = true),
             "Graine's own close still says so")
         // The iOS facade says `offline` there; with `ended` it is idle too.
         assertEquals(GraineChatStatus.IDLE, Bridge.chat("""{"turns":[],"status":"offline","ended":true}""").status)
-        assertEquals(GraineChatStatus.OFFLINE, Bridge.chat("""{"turns":[],"status":"offline","ended":false}""").status)
+        assertEquals(GraineChatStatus.FAILED, Bridge.chat("""{"turns":[],"status":"offline","ended":false}""").status)
         assertEquals(GraineChatStatus.DISCONNECTED, Bridge.chat("""{"turns":[],"status":"disconnected","ended":true}""").status)
     }
 
     @Test
+    @Suppress("DEPRECATION")
     fun aChatThatGaveUpIsFailedBesideItsWordAndATryAgainClearsIt() {
         // The iOS facade says a chat that gave up as `offline`: failed, never for one the agent ended or Graine closed.
         assertTrue(Bridge.chat("""{"turns":[],"status":"offline","ended":false}""").extras.failed)
         assertFalse(Bridge.chat("""{"turns":[],"status":"offline","ended":true}""").extras.failed)
         assertFalse(Bridge.chat("""{"turns":[],"status":"disconnected"}""").extras.failed)
         assertFalse(Bridge.chat("""{"turns":[],"status":"reconnecting","attempt":3}""").extras.failed)
-        // Through the shared API: the flag beside the word, which stays OFFLINE as before.
+        // Through the shared API: the word says it (0.14.5), and the flag beside it stays for code that reads it.
         configured()
         assertFalse(Graine.chat.failed.value)
-        engine.sink.chat(emptyList(), GraineChatStatus.OFFLINE, false)
+        engine.sink.chat(emptyList(), GraineChatStatus.FAILED, false)
         engine.sink.chatExtras(ChatExtras(failed = true))
         assertTrue(Graine.chat.failed.value)
-        assertEquals(GraineChatStatus.OFFLINE, Graine.chat.status.value)
+        assertEquals(GraineChatStatus.FAILED, Graine.chat.status.value)
         Graine.chat.retry()
         engine.sink.chat(emptyList(), GraineChatStatus.CONNECTING, false)
         engine.sink.chatExtras(ChatExtras(failed = false))
@@ -109,10 +110,10 @@ class PublicStateTest {
         assertTrue(after.extras.newConversationBefore.isEmpty())
         // And a component of the conversation before is let go once the chat is online again as the new identity.
         configured()
-        engine.sink.chat(emptyList(), GraineChatStatus.ONLINE, false)
+        engine.sink.chat(emptyList(), GraineChatStatus.CONNECTED, false)
         engine.sink.event(GraineEvent.Component(slots))
         engine.sink.chat(after.turns, GraineChatStatus.CONNECTING, false)
-        engine.sink.chat(after.turns, GraineChatStatus.ONLINE, false)
+        engine.sink.chat(after.turns, GraineChatStatus.CONNECTED, false)
         assertNull(Graine.component.value)
     }
 
@@ -124,7 +125,7 @@ class PublicStateTest {
         val earlier = turn("b1", "2026-10-20T10:00:00Z", user = true).copy(session = "s-7a1c", restored = true)
         val now1 = turn("t1", "2026-10-21T08:59:00Z", user = true).copy(session = "s-9f2c")
         val now2 = turn("t2", "2026-10-21T08:59:02Z").copy(session = "s-9f2c")
-        engine.sink.chat(listOf(earlier, now1, now2), GraineChatStatus.ONLINE, false)
+        engine.sink.chat(listOf(earlier, now1, now2), GraineChatStatus.CONNECTED, false)
         assertEquals(listOf("s-7a1c", "s-9f2c"), Graine.chat.sessions.value.map { it.id })
         assertEquals(listOf(false, false), Graine.chat.sessions.value.map { it.current }, "not current until the chat says which is")
         engine.sink.chatExtras(ChatExtras(sessionId = "s-9f2c"))
@@ -399,12 +400,12 @@ class PublicStateTest {
     @Test
     fun aChatThatConnectsAgainLetsTheLastConversationsComponentGo() {
         configured()
-        engine.sink.chat(emptyList(), GraineChatStatus.ONLINE, false)
+        engine.sink.chat(emptyList(), GraineChatStatus.CONNECTED, false)
         engine.sink.event(GraineEvent.Component(slots))
-        engine.sink.chat(emptyList(), GraineChatStatus.ONLINE, true)
+        engine.sink.chat(emptyList(), GraineChatStatus.CONNECTED, true)
         assertEquals(slots, Graine.component.value, "the same connection")
         engine.sink.chat(emptyList(), GraineChatStatus.RECONNECTING, false)
-        engine.sink.chat(emptyList(), GraineChatStatus.ONLINE, false)
+        engine.sink.chat(emptyList(), GraineChatStatus.CONNECTED, false)
         assertNull(Graine.component.value)
     }
 

@@ -233,33 +233,66 @@ internal object ChatPins {
 /** [text] composed (Unicode NFC), as the platform SDKs compose the words they draw. */
 internal expect fun composed(text: String): String
 
-/** Where the chat's connection is. */
-enum class GraineChatStatus {
+/**
+ * WHERE THE CHAT IS, in the words every Graine SDK uses (sdk/contract/
+ * PUBLIC-STATE.md, "Chat"): [wire] spells each. First match wins: CONNECTED,
+ * RECONNECTING, CONNECTING, DISCONNECTED, FAILED, OFFLINE, else IDLE.
+ *
+ * 0.14.5: CONNECTED is what ONLINE was (`GraineChatStatus.ONLINE` still
+ * compiles, as an alias of CONNECTED); a chat that gave up says FAILED — what
+ * [GraineChat.failed] said beside OFFLINE before — and OFFLINE now means what
+ * every SDK means by it: a message waiting and nothing connecting it. Use an
+ * `else` branch in a `when`, as more may come.
+ */
+enum class GraineChatStatus(
+    /** The word every Graine SDK uses for it. */
+    val wire: String,
+) {
     /**
      * Not in use: never opened, left, or the app is in the background — or the
      * agent ended the conversation ([GraineChat.ended]) and its connection
      * closed; the user's next message starts over.
      */
-    IDLE,
-    CONNECTING,
-    ONLINE,
-    /** The connection dropped and is being made again. */
-    RECONNECTING,
+    IDLE("idle"),
+    CONNECTING("connecting"),
+    /** Connected: a message goes now. (ONLINE before 0.14.5.) */
+    CONNECTED("connected"),
+    /** The connection dropped — or a try to open it failed — and is being made again. */
+    RECONNECTING("reconnecting"),
     /**
-     * It could not reconnect: every retry was spent ([GraineChat.failed] says
-     * so too). A message, or [GraineChat.retry], connects again. Never for a
-     * conversation the agent ended — that is [IDLE], with [GraineChat.ended]
-     * true.
+     * A message of the user's waiting to go, and nothing connecting it — the
+     * app in the background, a native call holding the chat: it goes once the
+     * chat connects. (Before 0.14.5 this said what FAILED says.)
      */
-    OFFLINE,
+    OFFLINE("offline"),
     /**
-     * Graine ended the conversation itself — idle for 5 minutes, or at the
-     * session's time limit — and it does not reconnect on its own: the lines
-     * stay, the SDK's chat says "Disconnected", and opening the chat or a
-     * message connects again (continued when Graine can continue it). On iOS
-     * it needs the GraineInApp of this version (an older one says [OFFLINE]).
+     * The chat gave up: every retry was spent, the server closed the
+     * conversation, or Graine refused it. A message, [GraineChat.retry] or
+     * [GraineChat.open] connects again. Never for a conversation the agent
+     * ended — that is IDLE, with [GraineChat.ended] true. New in 0.14.5.
      */
-    DISCONNECTED,
+    FAILED("failed"),
+    /**
+     * Graine ended the conversation itself — idle, or at the session's time
+     * limit — and it does not reconnect on its own: the lines stay, the SDK's
+     * chat says "Disconnected", and opening the chat or a message connects
+     * again (continued when Graine can continue it). On iOS it needs the
+     * GraineInApp of this version (an older one says FAILED).
+     */
+    DISCONNECTED("disconnected"),
+    ;
+
+    companion object {
+        /** CONNECTED, by its name before 0.14.5. */
+        @Deprecated(
+            "The chat's status says CONNECTED, the word every Graine SDK uses.",
+            ReplaceWith("GraineChatStatus.CONNECTED", "ai.graine.inapp.kmp.GraineChatStatus"),
+        )
+        val ONLINE: GraineChatStatus get() = CONNECTED
+
+        /** The status for a word of [wire]'s, any case; null for a word it does not know. */
+        fun of(wire: String?): GraineChatStatus? = entries.firstOrNull { it.wire == wire?.trim()?.lowercase() }
+    }
 }
 
 /**
@@ -299,17 +332,25 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
     /** What has been said, oldest first. */
     val turns: StateFlow<List<GraineChatTurn>> = agent.chatTurns.asStateFlow()
 
+    /**
+     * Where the chat is, in the words every Graine SDK uses ([GraineChatStatus]):
+     * IDLE, CONNECTING, CONNECTED, RECONNECTING, OFFLINE (a message waiting,
+     * nothing connecting it), FAILED (it gave up — a message, [retry] or [open]
+     * tries again) or DISCONNECTED (Graine ended the conversation). 0.14.5: a
+     * chat that gave up says FAILED, where it said OFFLINE.
+     */
     val status: StateFlow<GraineChatStatus> = agent.chatStatus.asStateFlow()
 
     /**
      * THE CHAT GAVE UP: every retry was spent and it will not connect again
      * by itself — where the SDK's chat window offers a tap to try again. True
      * until the user sends a message or tries again ([retry], [open], [send]),
-     * when it connects again. [status] says
-     * [GraineChatStatus.OFFLINE] meanwhile, as it always has. Never for a
-     * conversation the agent ended ([ended]) or Graine closed
-     * ([GraineChatStatus.DISCONNECTED]). New in 0.14.1.
+     * when it connects again. Never for a conversation the agent ended
+     * ([ended]) or Graine closed ([GraineChatStatus.DISCONNECTED]). New in
+     * 0.14.1; from 0.14.5 [status] says it too (FAILED), and this stays for
+     * code that reads it.
      */
+    @Deprecated("The chat's status says FAILED.", ReplaceWith("status.value == GraineChatStatus.FAILED"))
     val failed: StateFlow<Boolean> = agent.chatFailed.asStateFlow()
 
     /** The agent is working on a reply: from the user's message until its first words. */

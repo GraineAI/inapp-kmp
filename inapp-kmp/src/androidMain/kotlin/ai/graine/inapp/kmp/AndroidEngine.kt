@@ -234,10 +234,13 @@ internal class AndroidEngine(
         set(value) { port.chatCloseDelaySeconds = value }
 
     private fun publishChat() {
+        val turns = port.chatTurns.map { AndroidMapping.turn(it) }
         val status = ChatInference.status(
             port.chatConnected, port.chatConnecting, port.chatFailed, port.chatReconnecting, port.chatDisconnected, port.chatEnded,
+            // A line the Android SDK still holds to send, with nothing connecting it: offline, as every SDK says it.
+            waiting = ChatInference.waiting(turns),
         )
-        sink.chat(port.chatTurns.map { AndroidMapping.turn(it) }, status, port.chatTyping)
+        sink.chat(turns, status, port.chatTyping)
         sink.chatExtras(
             AndroidMapping.extras(port.chatQuickReplies, port.chatEnded, port.chatRating, port.chatPinned)
                 .copy(

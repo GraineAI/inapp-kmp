@@ -19,6 +19,51 @@ import kotlinx.datetime.Instant
 enum class GraineCallState { IDLE, RINGING, CONNECTING, ACTIVE, ENDED }
 
 /**
+ * WHERE A NATIVE CALL IS, as a call screen shows it — the one word every
+ * Graine SDK uses for it (sdk/contract/PUBLIC-STATE.md, "Calls"; Flutter's and
+ * React Native's `phase`): [GraineCalls.phase], [GraineCallInfo.phase]. [wire]
+ * spells each. Use an `else` branch in a `when`, as more may come. New in 0.14.5.
+ */
+enum class GraineCallPhase(
+    /** The word every Graine SDK uses for it. */
+    val wire: String,
+) {
+    /** No call. */
+    IDLE("idle"),
+    /** An agent's call is ringing on this device. */
+    RINGING("ringing"),
+    /** The user's call, before the agent answers. */
+    CALLING("calling"),
+    /** An answered ring, connecting. */
+    CONNECTING("connecting"),
+    /** On the call. */
+    ACTIVE("active"),
+    /** On the call, its connection being recovered: "Reconnecting…". */
+    RECONNECTING("reconnecting"),
+    /** The call is over — its last moment on screen. */
+    ENDED("ended"),
+    /** A ring nobody answered ([GraineCallInfo.missedCall]), until the user calls back, dismisses it, or another call rings or is placed. */
+    MISSED("missed"),
+    ;
+
+    companion object {
+        /**
+         * The phase of a call in [state] — Flutter's and React Native's mapping:
+         * the user's call not yet answered is CALLING, a connected call
+         * recovering its connection RECONNECTING, and no call with a missed ring
+         * kept to call back MISSED.
+         */
+        fun of(state: GraineCallState, incoming: Boolean, reconnecting: Boolean, missed: Boolean): GraineCallPhase = when (state) {
+            GraineCallState.IDLE -> if (missed) MISSED else IDLE
+            GraineCallState.RINGING -> RINGING
+            GraineCallState.CONNECTING -> if (incoming) CONNECTING else CALLING
+            GraineCallState.ACTIVE -> if (reconnecting) RECONNECTING else ACTIVE
+            GraineCallState.ENDED -> ENDED
+        }
+    }
+}
+
+/**
  * What became of a call — for your server, and for your own screens. Every
  * outcome carries the call's id.
  *
@@ -184,6 +229,15 @@ data class GraineCallInfo(
 ) {
     /** A call screen has something to show: a call, or a missed ring to call back. */
     val showsCallScreen: Boolean get() = state != GraineCallState.IDLE || missedCall != null
+
+    /**
+     * WHERE THE CALL IS, in one word, as a call screen shows it — the word every
+     * Graine SDK uses ([GraineCallPhase]): IDLE, RINGING, CALLING (the user's
+     * call before the agent answers), CONNECTING, ACTIVE, RECONNECTING, ENDED,
+     * or MISSED while [missedCall] keeps a ring nobody answered. From [state],
+     * [incoming], [reconnecting] and [missedCall]. New in 0.14.5.
+     */
+    val phase: GraineCallPhase get() = GraineCallPhase.of(state, incoming, reconnecting, missedCall != null)
 }
 
 /**
@@ -351,6 +405,13 @@ data class GraineCallsConfig(
 class GraineCalls internal constructor() {
     /** The call as a call screen draws it. */
     val state: StateFlow<GraineCallInfo> = Graine.callInfo.asStateFlow()
+
+    /**
+     * WHERE THE CALL IS, in the word every Graine SDK uses — [GraineCallInfo.phase]
+     * of [state], as it changes: IDLE, RINGING, CALLING, CONNECTING, ACTIVE,
+     * RECONNECTING, ENDED or MISSED. New in 0.14.5.
+     */
+    val phase: StateFlow<GraineCallPhase> = Graine.callPhase.asStateFlow()
 
     /** What became of each call, as it happens. Not replayed: collect it from app start. */
     val outcomes: SharedFlow<GraineCallOutcome> = Graine.callOutcomes.asSharedFlow()

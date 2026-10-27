@@ -53,7 +53,7 @@ class MultiAgentTest {
         assertTrue(s.schedulingRules.usersCanBook)
         assertFalse(Graine.schedulingRules.usersCanBook)
         val turn = GraineChatTurn("1", GraineRole.AGENT, "How can I help?", Instant.fromEpochMilliseconds(1), proactive = true)
-        support.sink.chat(listOf(turn), GraineChatStatus.ONLINE, false)
+        support.sink.chat(listOf(turn), GraineChatStatus.CONNECTED, false)
         assertEquals(listOf(turn), s.chat.turns.value)
         assertTrue(Graine.chat.turns.value.isEmpty(), "chat on one agent never shows on another")
         s.chat.send("Where is my refund?")

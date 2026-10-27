@@ -309,8 +309,8 @@ class BridgeTest {
     fun theFlagsAreOneWordAndTheSdksReconnectingNamesARemake() {
         assertEquals(GraineChatStatus.CONNECTING, ChatInference.status(connected = false, connecting = true, failed = false, reconnecting = false))
         assertEquals(GraineChatStatus.RECONNECTING, ChatInference.status(connected = false, connecting = true, failed = false, reconnecting = true))
-        assertEquals(GraineChatStatus.ONLINE, ChatInference.status(true, false, false, false))
-        assertEquals(GraineChatStatus.OFFLINE, ChatInference.status(false, false, true, false))
+        assertEquals(GraineChatStatus.CONNECTED, ChatInference.status(true, false, false, false))
+        assertEquals(GraineChatStatus.FAILED, ChatInference.status(false, false, true, false))
         assertEquals(GraineChatStatus.IDLE, ChatInference.status(false, false, false, false))
         assertEquals(GraineChatStatus.IDLE, ChatInference.status(false, false, false, true), "not connecting is never reconnecting")
     }
