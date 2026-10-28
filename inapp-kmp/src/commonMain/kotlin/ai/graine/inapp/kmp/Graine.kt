@@ -322,13 +322,28 @@ object Graine {
      * calls it when Graine says the token expired, when a request is refused
      * [GraineErrorCode.IdentityUnverified] (that request is then sent once
      * more with the new token), before a conversation starts with a JWT that
-     * has less than a minute left, and when a call rings — at most once every
-     * 30 seconds, never twice at once. It starts on the main thread, so make
-     * the network call suspend (Ktor's do) rather than block. Returning null,
-     * or throwing, keeps the token as it was. One for the whole app, like
+     * has less than a minute left, and when a call rings.
+     *
+     * Since 0.14.6 it is also asked when no token is held at all — you
+     * identified the user and fetch the token afterwards — for an agent with
+     * "Verified users" on report or enforce: before a conversation starts
+     * (the chat, the voice bar, a call your app places) and before a request
+     * for the user ([memories], past sessions, a new conversation, booked
+     * calls, [startWorkflow]), the SDK waits up to 10 seconds for your answer,
+     * so that conversation goes out verified instead of anonymous. The token
+     * you return is kept, as [setIdentityToken] keeps one. No answer within
+     * 10 seconds lets the request go without one, and that refresh is not
+     * waited for again (its token is used when it comes). Answering a call
+     * that rings never waits for it.
+     *
+     * At most once every 30 seconds for the same user, never twice at once;
+     * another user signing in is asked for at once, and a token still on its
+     * way for the last user never reaches them. It starts on the main thread,
+     * so make the network call suspend (Ktor's do) rather than block.
+     * Returning null, or throwing, keeps the token as it was. One for the whole app, like
      * [identify]; may be set before [configure]. Null (the default): the SDK
      * only ever sends the token it was given. On iOS it needs the GraineInApp
-     * of this version. New in 0.14.4.
+     * of this version. New in 0.14.4; the wait for a missing token, in 0.14.6.
      *
      *     Graine.identityTokenRefresher = { api.graineIdentityToken() }   // a suspending call to your server
      */
