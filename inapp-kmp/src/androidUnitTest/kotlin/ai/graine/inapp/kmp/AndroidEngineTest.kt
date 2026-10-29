@@ -1090,6 +1090,57 @@ class AndroidEngineTest {
         )
     }
 
+    /** 0.14.8: a component's look crosses from the Android SDK whole — from the frame the conversation sent, and from a chat turn it rides on. */
+    @Test
+    fun aComponentKeepsItsLookFromTheFrameAndFromAChatTurn() {
+        start()
+        val frame = JSONObject(
+            """{"widget_id":"w1","kind":"product_list","data":{"title":"Three that fit"},
+               "style":{"preset":"Gallery","columns":2,"radius":12.5,"accent":"#0a7f3c","select":"many","maxSelect":4,"onclick":"x"}}""",
+        )
+        val expected = GraineComponentStyle(
+            preset = GraineComponentPreset.GALLERY, imageSize = GraineComponentImageSize.LARGE, columns = 2, surface = GraineComponentSurface.SCREEN,
+            radius = 13, accent = "#0A7F3C", select = GraineComponentSelect.MANY, maxSelect = 4,
+        )
+        port.listeners.single().onWidget(frame)
+        assertEquals(expected, (heard.events.single() as GraineEvent.Component).component.style)
+        port.chatTurns = listOf(NativeChatTurn("t1", Role.AGENT, "Three that fit", Date(1_000), component = GraineWidget.adopt(frame, "https://www.graine.ai")))
+        port.chatChanged()
+        assertEquals("a chat turn's component keeps its look", expected, heard.chat!!.first.single().component!!.style)
+        // A component with no look of its own carries none: the kind's place, Cards.
+        val bare = AndroidMapping.component(GraineWidget.adopt(JSONObject("""{"widget_id":"w2","kind":"choices"}"""), "https://www.graine.ai")!!)
+        assertFalse(bare.payload.containsKey("style"))
+        assertEquals(GraineComponentStyle(surface = GraineComponentSurface.SHEET), bare.style)
+    }
+
+    /** 0.14.8: a component's tap and blocks cross from the Android SDK — from the frame, and from a chat turn it rides on. */
+    @Test
+    fun aComponentKeepsItsTapAndBlocksFromTheFrameAndFromAChatTurn() {
+        start()
+        val frame = JSONObject(
+            """{"widget_id":"w1","kind":"blank",
+               "data":{"blocks":[{"id":"b1","type":"heading","content":"Your plan"},{"id":"b2","type":"image","imageUrl":"/samples/a.png"},
+                                 {"id":"b3","type":"button","content":"Talk to sales"}]},
+               "on_select":{"action":" Open_Plans ","args":{"id":"{id}","n":2},"say":"Open {title}"}}""",
+        )
+        val tap = GraineComponentTap(action = "open_plans", args = mapOf("id" to "{id}", "n" to "2"), say = "Open {title}")
+        port.listeners.single().onWidget(frame)
+        val fromFrame = (heard.events.single() as GraineEvent.Component).component
+        assertEquals(tap, fromFrame.onSelect)
+        assertEquals(listOf("b1", "b2", "b3"), fromFrame.blocks.map { it.id })
+        port.chatTurns = listOf(NativeChatTurn("t1", Role.AGENT, "Here it is", Date(1_000), component = GraineWidget.adopt(frame, "https://www.graine.ai")))
+        port.chatChanged()
+        val onTurn = heard.chat!!.first.single().component!!
+        assertEquals("a chat turn's component keeps its tap", tap, onTurn.onSelect)
+        assertEquals(listOf("Your plan", null, "Talk to sales"), onTurn.blocks.map { it.content })
+        assertEquals("the Android SDK put the picture on the agent's origin", "https://www.graine.ai/samples/a.png", onTurn.blocks[1].imageUrl)
+        assertEquals(GraineComponentTapCall("open_plans", mapOf("id" to "p1", "n" to "2"), "Open Plus"), onTurn.tapFor(mapOf("id" to "p1", "title" to "Plus")))
+        // A tap that only tells the agent carries nothing.
+        val tell = AndroidMapping.component(GraineWidget.adopt(JSONObject("""{"widget_id":"w2","kind":"choices","on_select":{"args":{"a":"b"}}}"""), "https://www.graine.ai")!!)
+        assertFalse(tell.payload.containsKey("on_select"))
+        assertEquals(null, tell.onSelect)
+    }
+
     @Test
     fun theVersionIsGradles() {
         assertEquals(System.getProperty("graine.version"), GraineKmpVersion.NAME)

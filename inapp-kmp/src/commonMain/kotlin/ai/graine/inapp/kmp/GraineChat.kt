@@ -16,18 +16,85 @@ enum class GraineDelivery {
 /** A component the agent drew — a product list, choices, time slots — as the conversation sent it. */
 data class GraineComponent(
     val id: String,
-    /** `product_list`, `plan_comparison`, `choices`, `quick_actions`, `calendar_slots`, `info_card` — or a newer one. */
+    /** `product_list`, `plan_comparison`, `choices`, `quick_actions`, `calendar_slots`, `info_card`, `blank` — or a newer one. */
     val kind: String?,
     val title: String?,
-    /** The whole component as it arrived. */
+    /**
+     * The whole component as it arrived — from 0.14.8 with its data's
+     * root-relative pictures on the agent's origin, as the SDK's own views
+     * draw them ([data]).
+     */
     val payload: Map<String, Any?>,
 ) {
-    /** What it shows — its items, options or slots, as the agent sent them (the payload's `data`); empty when it carries none. */
+    /**
+     * What it shows — its items, options or slots, as the agent sent them (the
+     * payload's `data`); empty when it carries none. A picture the dashboard
+     * gave as a path on its own site ("/samples/car.png") is a full URL on the
+     * agent's origin (`GraineConfig.baseUrl`), as the SDK's own views draw it
+     * (from 0.14.8).
+     */
     val data: Map<String, Any?>
         get() = (payload["data"] as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to v } ?: emptyMap()
 
     /** The words to show where it cannot be drawn (the payload's `fallback_text`); null when it has none. */
     val fallbackText: String? get() = (payload["fallback_text"] as? String)?.takeIf { it.isNotBlank() }
+
+    /**
+     * HOW IT LOOKS — the Look & feel the dashboard set on it (the payload's
+     * `style`), resolved for its [kind] as every Graine SDK resolves it: the
+     * preset, the picture size, the button, the columns, where it goes on
+     * screen, one choice or several ([GraineComponentStyle]). A component
+     * with no look of its own is Cards, in the place its kind takes. For
+     * drawing it in your own design; the SDK's views draw it this way
+     * themselves. New in 0.14.8.
+     */
+    val style: GraineComponentStyle = ComponentStyles.resolve(payload["style"], kind)
+
+    /**
+     * WHAT A TAP DOES IN YOUR APP — the "When they tap" the dashboard set on
+     * it (the payload's `on_select`): Open a screen or Run an action
+     * ([GraineComponentTap]). Null when a tap only tells the agent, which is
+     * the default. [tapFor] fills it for the item tapped. New in 0.14.8.
+     */
+    val onSelect: GraineComponentTap? = ComponentTaps.normalise(payload["on_select"] ?: payload["onSelect"])
+
+    /**
+     * ITS BLOCKS, for a component built from blocks — "Start blank" in the
+     * dashboard (kind `blank`): its headings, text, images, dividers and
+     * buttons, in order ([GraineComponentBlock]). Empty for any other kind.
+     * Only what can be drawn is kept: a block of a type this version does not
+     * know, a heading, text or button without words, an image without a
+     * picture, and anything that is not a block are left out. Each id is the
+     * block's own, or — when it has none, or an earlier block has it —
+     * `block-<n>`, its place in the list, so ids are unique keys. New in 0.14.8.
+     */
+    val blocks: List<GraineComponentBlock> = ComponentBlocks.read(kind, payload["data"])
+
+    /**
+     * THE TAP ON [item], READY TO RUN — the action your app runs, its
+     * arguments filled from the item, and the sentence to answer with instead
+     * of yours ([GraineComponentTapCall]); null when a tap only tells the agent
+     * ([onSelect] is null). [item] is the tapped item's fields — usually the
+     * `data` you answer with: an item's `id`, `title`, `price`…, and for
+     * several picked at once `ids` and `titles` (each comma-separated), as the
+     * SDK's views send them. [summary], when given, is the sentence you would
+     * answer with: it fills `{summary}`. A placeholder the item does not have
+     * is filled with nothing. [GraineComponentTapCall.say] is null when the
+     * tap has none, or it fills to nothing: answer with your own sentence then.
+     *
+     *     val call = component.tapFor(data, summary)
+     *     if (call != null) runInApp(call.action, call.args)   // first: open the screen, or run the action
+     *     Graine.chat.answerWidget(component.id, data, call?.say ?: summary)
+     *
+     * New in 0.14.8.
+     */
+    fun tapFor(item: Map<String, Any?>, summary: String? = null): GraineComponentTapCall? {
+        val tap = onSelect ?: return null
+        val fields = if (summary == null) item else LinkedHashMap(item).apply { put("summary", summary) }
+        val (action, args) = ComponentTaps.call(tap, fields) ?: return null
+        val say = tap.say?.let { ComponentTaps.fill(it, fields) }?.takeIf { it.isNotBlank() }
+        return GraineComponentTapCall(action, args, say)
+    }
 }
 
 /** Where a message was said. */
@@ -224,8 +291,8 @@ internal object ChatPins {
     private fun isControl(c: Char): Boolean =
         c <= '\u001F' || c in '\u007F'..'\u009F' || c == '\u2028' || c == '\u2029' || c in '\u202A'..'\u202E' || c in '\u2066'..'\u2069'
 
-    /** JavaScript's `\s`: its whitespace and line terminators. */
-    private fun isJsSpace(c: Char): Boolean =
+    /** JavaScript's `\s`: its whitespace and line terminators — what its `trim()` takes off too. */
+    internal fun isJsSpace(c: Char): Boolean =
         c == ' ' || c in '\t'..'\r' || c == '\u00A0' || c == '\u1680' || c in '\u2000'..'\u200A' || c == '\u2028' || c == '\u2029' ||
             c == '\u202F' || c == '\u205F' || c == '\u3000' || c == '\uFEFF'
 }
@@ -542,25 +609,29 @@ class GraineChat internal constructor(private val agent: GraineAgent) {
      * bar's call. [data] is the structured answer, for your webhook; [summary]
      * the sentence that is the user's turn ("The Creta, please"), without which
      * the conversation does not move. The SDK's own views answer for
-     * themselves. [GraineAgent.component] lets the component go (from 0.14.0).
-     * On iOS it needs the GraineInApp of this version.
+     * themselves. [GraineAgent.component] lets the component go (from 0.14.0),
+     * and — with a [summary] — [GraineAgent.componentAwaitingReply] is true
+     * until the agent starts its reply (from 0.14.8). On iOS it needs the
+     * GraineInApp of this version.
      */
     fun answerWidget(id: String, data: Map<String, Any?>, summary: String) {
         agent.engine().answerWidget(id, data, summary)
-        agent.componentDone(id)
+        agent.componentAnswered(id, summary)
     }
 
     /**
      * Close a component the agent drew without answering it, from a UI of
      * your own — what the close of the SDK's component view does: the agent
      * is told quietly, so it does not go on about options nobody can see, and
-     * [GraineAgent.component] lets it go. On iOS it needs the GraineInApp of
-     * this version (with an older one only the state lets it go).
+     * [GraineAgent.component] lets it go — and nothing is waited for:
+     * [GraineAgent.componentAwaitingReply] is false (0.14.8). On iOS it needs
+     * the GraineInApp of this version (with an older one only the state lets
+     * it go).
      */
     fun dismissWidget(id: String) {
         if (id.isBlank()) return
         agent.engine().dismissWidget(id)
-        agent.componentDone(id)
+        agent.componentDismissed(id)
     }
 
     /** Fetch [upcomingCalls] again — after booking one elsewhere (the chat refreshes them itself otherwise). */

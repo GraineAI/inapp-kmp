@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.14.7")
-            implementation("ai.graine:inapp-kmp-compose:0.14.7")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.14.8")
+            implementation("ai.graine:inapp-kmp-compose:0.14.8")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -113,7 +113,7 @@ and the Android SDK it builds on beside it as `android` — 0.14.4 for this
 release (`GRAINE_ANDROID_VERSION` in its `gradle.properties`). From your project's root:
 
 ```bash
-git clone --branch 0.14.7 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.14.8 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
 git clone --branch 0.14.7 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
@@ -974,16 +974,25 @@ the agent's calling hours when the time is booked (`OutsideWindow`).
 fun AgentComponent() {
     val component by Graine.component.collectAsState()
     val loading by Graine.componentPending.collectAsState()
+    val thinking by Graine.componentAwaitingReply.collectAsState()
     val c = component
     when {
         c != null -> Column {
+            val look = c.style                                        // the dashboard's Look & feel for it
             when (c.kind) {
-                "choices" -> Choices(c.data) { value, label -> Graine.chat.answerWidget(c.id, mapOf("choice" to value), summary = label) }
+                "choices" -> Choices(c.data, pickMany = look.select == GraineComponentSelect.MANY) { value, label ->
+                    val data = mapOf("choice" to value)
+                    val call = c.tapFor(data, label)                  // the dashboard's "When they tap"
+                    if (call != null) runInApp(call.action, call.args) // open the screen, or run the action, first
+                    Graine.chat.answerWidget(c.id, data, summary = call?.say ?: label)
+                }
+                "blank" -> Blocks(c.blocks)                           // a component built from blocks
                 else -> Text(c.fallbackText ?: c.title.orEmpty())     // a kind you do not draw
             }
             TextButton(onClick = { Graine.chat.dismissWidget(c.id) }) { Text("Close") }
         }
         loading -> CircularProgressIndicator()
+        thinking -> TypingDots()                                      // the agent is answering the choice
     }
 }
 ```
@@ -993,6 +1002,24 @@ or on the voice bar's call; it goes back to null when it is answered, closed
 or replaced, and when its conversation ends. `componentPending` is true while
 one is loading, for at most 12 seconds. `dismissWidget` also tells the agent,
 quietly, that the user closed it without choosing.
+
+`style` (0.14.8) is the look the dashboard gave the component, resolved as the
+SDK's own views draw it: `preset` (Gallery, Cards, List, Spotlight, Compact),
+`imageSize`, `density`, `button`, `facts`, `columns`, `surface` (the screen, a
+sheet or a card, by its kind unless the dashboard chose), `platform`, and
+`select` / `maxSelect` for picking several. `radius` and `accent` are null
+unless the component sets them — use your design's then. `onSelect` (0.14.8) is
+what a tap does in your app, as "When they tap" set it — open a screen (through
+the one `open_screen` handler your app registers) or run an action — and null
+when a tap only tells the agent; `tapFor(item, summary)` fills its placeholders
+for the item tapped and returns the action, its arguments and the sentence the
+agent hears instead of yours. `blocks` (0.14.8) are the headings, text, images,
+dividers and buttons of a component built with "Start blank" (kind `blank`), in
+order; a button's tap answers with `mapOf("action" to content)` and its words.
+A picture the dashboard gave as a path on its own site arrives as a full URL on
+your `baseUrl`. `componentAwaitingReply` (0.14.8) is true from your
+`answerWidget` with a summary until the agent starts its reply — its first
+words, its voice, its next component — and for at most 12 seconds.
 
 ## Errors
 

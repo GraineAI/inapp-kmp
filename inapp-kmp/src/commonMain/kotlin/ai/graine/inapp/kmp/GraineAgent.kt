@@ -68,11 +68,26 @@ class GraineAgent internal constructor(
     internal val themeState = MutableStateFlow<GraineThemeTokens?>(null)
     internal val componentState = MutableStateFlow<GraineComponent?>(null)
     internal val componentPendingState = MutableStateFlow(false)
+    internal val componentAwaitingState = MutableStateFlow(false)
     internal val bookingStateFlow = MutableStateFlow(GraineBookingState(available = false, reason = NOT_LOADED))
     internal val verificationState = MutableStateFlow(GraineVerification())
     /** Lets a loader that has stood too long go, as the SDK's renderer does. */
     @Volatile
     private var pendingExpiry: Job? = null
+    /** Stops waiting for a reply that has not started within 12 seconds, as the SDK's renderer does. */
+    @Volatile
+    private var awaitingExpiry: Job? = null
+    /** The agent's latest turn in the chat when the app answered: its reply is a turn after that one. */
+    @Volatile
+    private var answeredAfter: String? = null
+
+    /**
+     * Its configuration's `baseUrl` — the origin a component's root-relative
+     * pictures come from, as the SDK's views resolve them. Null before
+     * configure() (an engine installed by a test).
+     */
+    @Volatile
+    internal var origin: String? = null
 
     /** The app's [GraineChat.onRated]. */
     @Volatile
@@ -119,6 +134,23 @@ class GraineAgent internal constructor(
      * over, or after 12 seconds with nothing, as the SDK's renderer gives up.
      */
     val componentPending: StateFlow<Boolean> = componentPendingState.asStateFlow()
+
+    /**
+     * THE AGENT IS ANSWERING THE USER'S CHOICE — true from the moment your
+     * app answers a component ([GraineChat.answerWidget], with its summary)
+     * until the agent starts its reply: its first words in the chat, its
+     * voice or a caption on the voice bar's call, or the next component (or
+     * its loader). Draw a "thinking" mark beside the choice you keep on
+     * screen, so a tap never looks unheard. False again when the
+     * conversation is over, when a component is closed
+     * ([GraineChat.dismissWidget]), and after 12 seconds with no reply — the
+     * SDK's renderer stops waiting then too. Only your app's answers set it:
+     * the SDK's own views show their own wait. New in 0.14.8.
+     *
+     *     val thinking by agent.componentAwaitingReply.collectAsState()
+     *     if (thinking) TypingDots()
+     */
+    val componentAwaitingReply: StateFlow<Boolean> = componentAwaitingState.asStateFlow()
 
     /** The typed conversation with this agent. */
     val chat: GraineChat = GraineChat(this)
@@ -432,15 +464,42 @@ class GraineAgent internal constructor(
         if (componentState.value?.id == id) componentState.value = null
     }
 
-    /** The component state as the conversation moves: one arrives, one is on its way, the conversation is over. */
+    /**
+     * The app answered the component [id] ([GraineChat.answerWidget]): it is
+     * no longer on screen, and the agent's reply is awaited — when the answer
+     * carried its sentence. Without one the conversation does not move, so
+     * there is nothing to wait for (and a wait already running is left as it is).
+     */
+    internal fun componentAnswered(id: String, summary: String) {
+        componentDone(id)
+        if (summary.isBlank()) return
+        answeredAfter = chatTurns.value.lastOrNull { isAgentTurnOfNow(it) }?.id
+        componentAwaitingState.value = true
+        awaitingExpiry?.cancel()
+        awaitingExpiry = Graine.actionScope.launch {
+            delay(AWAITING_REPLY_MS)
+            componentAwaitingState.value = false
+        }
+    }
+
+    /** The app closed the component [id] ([GraineChat.dismissWidget]): no longer on screen, and nothing is waited for. */
+    internal fun componentDismissed(id: String) {
+        componentDone(id)
+        awaitingOver()
+    }
+
+    /** The component state as the conversation moves: one arrives, one is on its way, the agent speaks, the conversation is over. */
     private fun componentHeard(event: GraineEvent) {
         when (event) {
             is GraineEvent.Component -> {
+                // Any component the agent draws is the agent answering.
+                awaitingOver()
                 pendingExpiry?.cancel()
                 componentPendingState.value = false
                 componentState.value = event.component
             }
             is GraineEvent.ComponentPending -> {
+                awaitingOver()
                 componentPendingState.value = true
                 pendingExpiry?.cancel()
                 pendingExpiry = Graine.actionScope.launch {
@@ -448,16 +507,40 @@ class GraineAgent internal constructor(
                     componentPendingState.value = false
                 }
             }
+            // The agent's words — a caption on the voice bar's call, a message in the chat — are the agent answering.
+            is GraineEvent.Caption -> if (event.role == GraineRole.AGENT) awaitingOver()
+            is GraineEvent.ChatMessage -> if (event.turn.role == GraineRole.AGENT) awaitingOver()
             GraineEvent.VoiceEnded -> componentGone()
             else -> Unit
         }
     }
 
-    /** Nothing from the conversation that ended can be answered: no component, no loader. */
+    /** Nothing from the conversation that ended can be answered: no component, no loader, no reply to wait for. */
     private fun componentGone() {
         pendingExpiry?.cancel()
         componentPendingState.value = false
         componentState.value = null
+        awaitingOver()
+    }
+
+    /** The agent started its reply, or nothing can be replied to any more: the wait is over. */
+    private fun awaitingOver() {
+        awaitingExpiry?.cancel()
+        awaitingExpiry = null
+        componentAwaitingState.value = false
+    }
+
+    /** One of the agent's turns of this conversation — not one restored from an earlier one. */
+    private fun isAgentTurnOfNow(turn: GraineChatTurn): Boolean = turn.role == GraineRole.AGENT && !turn.restored
+
+    /**
+     * The agent's reply has started in the chat: its latest turn, with words
+     * in it, is not the one it had when the app answered. The chat's event
+     * for a message comes only once the message is whole; this is its first words.
+     */
+    private fun replyStartedIn(turns: List<GraineChatTurn>): Boolean {
+        val latest = turns.lastOrNull { isAgentTurnOfNow(it) } ?: return false
+        return latest.id != answeredAfter && latest.text.isNotBlank()
     }
 
     /** The user calls this agent: `Graine.calls.startCall(reason, variables, agent = name)`. */
@@ -493,13 +576,17 @@ class GraineAgent internal constructor(
         }
 
         override fun event(event: GraineEvent) {
-            componentHeard(event)
-            eventFlow.tryEmit(event)
+            // A component arrives as the conversation sent it: its pictures are drawn on the agent's origin, as the SDK's views draw them.
+            val heard = if (event !is GraineEvent.Component) event
+                else ComponentImages.on(event.component, origin).let { if (it === event.component) event else GraineEvent.Component(it) }
+            componentHeard(heard)
+            eventFlow.tryEmit(heard)
         }
 
         override fun chat(turns: List<GraineChatTurn>, status: GraineChatStatus, typing: Boolean) {
             // A chat that connects again is a new conversation on the server: a component from the last cannot be answered.
             if (status == GraineChatStatus.CONNECTED && chatStatus.value != GraineChatStatus.CONNECTED) componentGone()
+            if (componentAwaitingState.value && replyStartedIn(turns)) awaitingOver()
             chatTurns.value = turns
             chatStatus.value = status
             chatTyping.value = typing
@@ -537,6 +624,8 @@ class GraineAgent internal constructor(
         override fun incomingCall(call: GraineIncomingCall) = Graine.callsReported(this@GraineAgent) { Graine.incomingCalls.tryEmit(call) }
 
         override fun voice(info: GraineVoiceInfo) {
+            // The agent's voice starting on the call is the agent answering, captioned or not.
+            if (info.status == GraineVoiceStatus.SPEAKING && voiceInfo.value.status != GraineVoiceStatus.SPEAKING) awaitingOver()
             voiceInfo.value = info
         }
 
@@ -574,6 +663,8 @@ class GraineAgent internal constructor(
         bookingStateFlow.value = GraineBookingState(available = false, reason = NOT_LOADED)
         verificationState.value = GraineVerification()
         componentGone()
+        answeredAfter = null
+        origin = null
     }
 
     internal companion object {
@@ -581,6 +672,8 @@ class GraineAgent internal constructor(
         const val NOT_LOADED = "not_loaded"
         /** How long a component's loader may stand with nothing arriving — the SDK's renderer's 12 seconds. */
         const val PENDING_COMPONENT_MS = 12_000L
+        /** How long an answer waits for the agent's reply to start — the SDK's renderer's 12 seconds (AWAITING_REPLY_MS). */
+        const val AWAITING_REPLY_MS = 12_000L
     }
 }
 

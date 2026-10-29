@@ -34,6 +34,8 @@ import ai.graine.inapp.GraineWidget
 import ai.graine.inapp.Role
 import ai.graine.inapp.SessionConfig
 import ai.graine.inapp.Transport
+import ai.graine.inapp.WidgetSelectAction
+import ai.graine.inapp.WidgetStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -275,16 +277,32 @@ internal object AndroidMapping {
     fun extras(replies: List<NativeQuickReply>, ended: Boolean, rated: NativeChatRating?, pinned: NativeChatPin?): ChatExtras =
         ChatExtras(replies.map { quickReply(it) }, ended, rated?.let { rating(it) }, pinned?.let { pin(it) })
 
-    /** A component the Android SDK adopted, as the shared one: what it is, and all of it as plain values. */
+    /** A component the Android SDK adopted, as the shared one: what it is, and all of it as plain values — its look too. */
     fun component(w: GraineWidget): GraineComponent {
         val data = map(w.data)
+        val payload = linkedMapOf<String, Any?>("widget_id" to w.id, "kind" to w.kind, "data" to data, "fallback_text" to w.fallbackText)
+        // As the frame carried them: only when the component has a look, or a tap that does something in the app, of its own.
+        style(w.style).takeIf { it.isNotEmpty() }?.let { payload["style"] = it }
+        onSelect(w.onSelect).takeIf { it.isNotEmpty() }?.let { payload["on_select"] = it }
         return GraineComponent(
             id = w.id,
             kind = w.kind.takeIf { it.isNotBlank() },
             title = (data["title"] as? String)?.takeIf { it.isNotBlank() },
-            payload = linkedMapOf("widget_id" to w.id, "kind" to w.kind, "data" to data, "fallback_text" to w.fallbackText),
+            payload = payload,
         )
     }
+
+    /** The look the Android SDK kept for a component (already allowlisted), in the frame's own words: what it chose, nothing else. */
+    fun style(s: WidgetStyle): Map<String, Any?> = linkedMapOf<String, Any?>(
+        "preset" to s.preset, "imageSize" to s.imageSize, "density" to s.density, "button" to s.button, "facts" to s.facts,
+        "columns" to s.columns, "surface" to s.surface, "radius" to s.radius, "accent" to s.accent, "platform" to s.platform,
+        "select" to s.select, "maxSelect" to s.maxSelect,
+    ).filterValues { it != null }
+
+    /** The tap the Android SDK kept for a component (already allowlisted), in the frame's own words: empty when a tap only tells the agent. */
+    fun onSelect(s: WidgetSelectAction): Map<String, Any?> = linkedMapOf<String, Any?>(
+        "path" to s.path, "action" to s.action, "args" to s.args?.takeIf { it.isNotEmpty() }, "say" to s.say,
+    ).filterValues { it != null }
 
     fun role(r: Role): GraineRole = if (r == Role.AGENT) GraineRole.AGENT else GraineRole.USER
 

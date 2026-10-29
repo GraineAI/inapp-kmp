@@ -79,7 +79,10 @@ object Graine {
         val agent = holder(normalise(name))
         // Claimed under the lock, made outside it: the platform SDK is never called holding it.
         val mine = lock.locked { if (agent.claimed) false else { agent.claimed = true; true } }
-        if (mine) install(agent, engineFactory(config, agent.name))
+        if (mine) {
+            agent.origin = config.baseUrl
+            install(agent, engineFactory(config, agent.name))
+        }
         return agent
     }
 
@@ -165,6 +168,16 @@ object Graine {
      * [GraineAgent.componentPending]. New in 0.14.0.
      */
     val componentPending: StateFlow<Boolean> get() = defaultAgent.componentPending
+
+    /**
+     * True from the moment your app answers one of the default agent's
+     * components ([GraineChat.answerWidget], with its summary) until the
+     * agent starts its reply — draw a "thinking" mark beside the choice.
+     * False again on the agent's first words, its next component, the end of
+     * the conversation, [GraineChat.dismissWidget], or after 12 seconds with
+     * no reply. See [GraineAgent.componentAwaitingReply]. New in 0.14.8.
+     */
+    val componentAwaitingReply: StateFlow<Boolean> get() = defaultAgent.componentAwaitingReply
 
     /** What the default agent allows when a user books a call. */
     val schedulingRules: GraineSchedulingRules get() = defaultAgent.schedulingRules

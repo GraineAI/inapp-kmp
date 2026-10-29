@@ -14,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -421,5 +422,156 @@ class PublicStateTest {
         advanceTimeBy(2)
         runCurrent()
         assertFalse(Graine.componentPending.value, "the SDK's renderer gives up too")
+    }
+
+    // ── waiting for the agent's reply (0.14.8) ────────────────────────────
+
+    private fun answer(agent: GraineAgent? = null) =
+        (agent?.chat ?: Graine.chat).answerWidget("w1", mapOf("slot" to "10:00"), "10 am, please")
+
+    private fun said(id: String, text: String, user: Boolean = false, live: Boolean = false, restored: Boolean = false) =
+        GraineChatTurn(id, if (user) GraineRole.USER else GraineRole.AGENT, text, now, live = live, restored = restored)
+
+    @Test
+    fun anAnswerIsAwaitedUntilTheAgentStartsItsReply() = runTest {
+        Graine.actionDispatcher = StandardTestDispatcher(testScheduler)
+        configured()
+        val waiting = { Graine.componentAwaitingReply.value }
+        assertFalse(waiting(), "nothing answered")
+        engine.sink.event(GraineEvent.Component(slots))
+        answer()
+        assertTrue(waiting(), "answered: the agent has not started")
+        assertNull(Graine.component.value, "and the component is off the screen")
+        engine.sink.event(GraineEvent.Caption(GraineRole.USER, "10 am, please", false))
+        engine.sink.event(GraineEvent.ChatMessage(said("u1", "10 am, please", user = true)))
+        assertTrue(waiting(), "the user's own words are not the reply")
+        engine.sink.event(GraineEvent.Caption(GraineRole.AGENT, "Booked", true))
+        assertFalse(waiting(), "a caption of the agent's on the call")
+
+        answer()
+        engine.sink.event(GraineEvent.ChatMessage(said("a9", "Booked for 10 am.")))
+        assertFalse(waiting(), "a message of the agent's in the chat")
+        answer()
+        engine.sink.event(GraineEvent.Component(slots))
+        assertFalse(waiting(), "the next component")
+        assertEquals(slots, Graine.component.value)
+        answer()
+        engine.sink.event(GraineEvent.ComponentPending(emptyMap()))
+        assertFalse(waiting(), "the next component's loader")
+        answer()
+        engine.sink.event(GraineEvent.VoiceEnded)
+        assertFalse(waiting(), "the call is over")
+        answer()
+        Graine.chat.dismissWidget("w1")
+        assertFalse(waiting(), "closed")
+        answer()
+        engine.sink.chat(emptyList(), GraineChatStatus.RECONNECTING, false)
+        assertTrue(waiting())
+        engine.sink.chat(emptyList(), GraineChatStatus.CONNECTED, false)
+        assertFalse(waiting(), "a chat that connects again is a new conversation")
+        Graine.chat.answerWidget("w1", mapOf("slot" to "10:00"), "  ")
+        assertFalse(waiting(), "no sentence: the conversation does not move, so no reply is coming")
+        assertEquals(8, engine.answers.size, "every answer reached the platform")
+    }
+
+    @Test
+    fun theAgentsFirstWordsInTheChatEndTheWaitBeforeItsMessageIsWhole() = runTest {
+        Graine.actionDispatcher = StandardTestDispatcher(testScheduler)
+        configured()
+        val asked = said("a1", "Which time suits you?")
+        val chose = said("u1", "10 am, please", user = true)
+        engine.sink.chat(listOf(asked), GraineChatStatus.CONNECTED, false)
+        answer()
+        engine.sink.chat(listOf(asked, chose), GraineChatStatus.CONNECTED, true)
+        assertTrue(Graine.componentAwaitingReply.value, "typing is not talking")
+        engine.sink.chat(listOf(asked, chose, said("a2", "", live = true)), GraineChatStatus.CONNECTED, true)
+        assertTrue(Graine.componentAwaitingReply.value, "a turn with no words yet")
+        engine.sink.chat(listOf(asked, chose, said("a2", "Booked", live = true)), GraineChatStatus.CONNECTED, false)
+        assertFalse(Graine.componentAwaitingReply.value, "its first words")
+
+        // A turn already under way when the user answered is not the reply, and neither is one from an earlier conversation.
+        answer()
+        engine.sink.chat(listOf(asked, chose, said("a2", "Booked for 10 am", live = true)), GraineChatStatus.CONNECTED, false)
+        engine.sink.chat(listOf(asked, chose, said("a2", "Booked for 10 am."), said("r1", "Hello again", restored = true)), GraineChatStatus.CONNECTED, false)
+        assertTrue(Graine.componentAwaitingReply.value)
+        engine.sink.chat(
+            listOf(asked, chose, said("a2", "Booked for 10 am."), said("u2", "And a reminder?", user = true), said("a3", "Sure", live = true)),
+            GraineChatStatus.CONNECTED, false,
+        )
+        assertFalse(Graine.componentAwaitingReply.value, "the agent's next turn")
+    }
+
+    @Test
+    fun theAgentsVoiceStartingOnTheCallEndsTheWait() = runTest {
+        Graine.actionDispatcher = StandardTestDispatcher(testScheduler)
+        configured()
+        val voice = { status: GraineVoiceStatus -> engine.sink.voice(GraineVoiceInfo(connected = true, status = status)) }
+        voice(GraineVoiceStatus.LISTENING)
+        answer()
+        voice(GraineVoiceStatus.THINKING)
+        assertTrue(Graine.componentAwaitingReply.value)
+        voice(GraineVoiceStatus.SPEAKING)
+        assertFalse(Graine.componentAwaitingReply.value, "its voice, before any caption")
+        // Answered while it was still speaking: only its voice starting again is the reply.
+        answer()
+        voice(GraineVoiceStatus.SPEAKING)
+        assertTrue(Graine.componentAwaitingReply.value, "the sentence it was finishing")
+        voice(GraineVoiceStatus.LISTENING)
+        voice(GraineVoiceStatus.SPEAKING)
+        assertFalse(Graine.componentAwaitingReply.value)
+    }
+
+    @Test
+    fun aReplyThatNeverStartsIsNoLongerAwaitedAfterTwelveSeconds() = runTest {
+        Graine.actionDispatcher = StandardTestDispatcher(testScheduler)
+        configured()
+        answer()
+        runCurrent()
+        advanceTimeBy(11_999)
+        runCurrent()
+        assertTrue(Graine.componentAwaitingReply.value)
+        advanceTimeBy(2)
+        runCurrent()
+        assertFalse(Graine.componentAwaitingReply.value, "the SDK's renderer stops waiting too")
+        // Another answer waits 12 seconds of its own.
+        answer()
+        advanceTimeBy(10_000)
+        runCurrent()
+        answer()
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertTrue(Graine.componentAwaitingReply.value, "the second answer's 12 seconds")
+        advanceTimeBy(2_001)
+        runCurrent()
+        assertFalse(Graine.componentAwaitingReply.value)
+        // A reply that started takes its timer with it: it never cuts the next answer's wait short.
+        answer()
+        advanceTimeBy(5_000)
+        runCurrent()
+        engine.sink.event(GraineEvent.Caption(GraineRole.AGENT, "Sure", true))
+        answer()
+        advanceTimeBy(8_000)
+        runCurrent()
+        assertTrue(Graine.componentAwaitingReply.value)
+        Graine.reset()
+        assertFalse(Graine.componentAwaitingReply.value)
+    }
+
+    @Test
+    fun eachAgentWaitsForItsOwnReplyAndGraineIsTheDefaultAgents() = runTest {
+        Graine.actionDispatcher = StandardTestDispatcher(testScheduler)
+        configured()
+        val other = FakeEngine()
+        Graine.install(other, "support")
+        val support = Graine.agent("support")!!
+        assertSame(Graine.agent()!!.componentAwaitingReply, Graine.componentAwaitingReply)
+        answer(support)
+        assertTrue(support.componentAwaitingReply.value)
+        assertFalse(Graine.componentAwaitingReply.value, "the default agent was not answered")
+        assertTrue(other.calls.contains("answerWidget:w1") && !engine.calls.contains("answerWidget:w1"))
+        engine.sink.event(GraineEvent.Caption(GraineRole.AGENT, "Hello", true))
+        assertTrue(support.componentAwaitingReply.value, "another agent's words are not its reply")
+        other.sink.event(GraineEvent.Caption(GraineRole.AGENT, "Booked", true))
+        assertFalse(support.componentAwaitingReply.value)
     }
 }
