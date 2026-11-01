@@ -7,16 +7,17 @@ import org.junit.Test
 import java.io.File
 
 /**
- * A COMPONENT'S TAP AND PICTURES ARE THE SDK CONTRACT'S; ITS BLOCKS ARE THE DASHBOARD'S.
+ * A COMPONENT'S TAP, PICTURES AND BLOCKS ARE THE SDK CONTRACT'S.
  *
  * sdk/contract/rn-parity.json holds what the React Native SDK's own built code
- * answers for a tap (normaliseSelectAction, selectCall, fillSelectTemplate)
- * and for pictures (resolveWidgetImages); this library reproduces every
- * answer, and its constants are read from protocol.ts itself. Blocks are read
- * by no SDK before this one, so their shape is the dashboard's own
- * (lib/web-widgets.ts: the "blank" kind and BlankBlock). All of it sits
- * beside this library in the monorepo: an exported checkout has none of it,
- * and skips.
+ * answers for a tap (normaliseSelectAction, selectCall, fillSelectTemplate),
+ * for pictures (resolveWidgetImages) and for a "Start blank" component's
+ * blocks (normaliseBlankBlocks); this library reproduces every answer, and
+ * its constants and the blocks' shape are read from protocol.ts itself. The
+ * dashboard makes blocks in that same shape (lib/web-widgets.ts: the "blank"
+ * kind, and BlankBlock re-exported from the contract). All of it sits beside
+ * this library in the monorepo: an exported checkout has none of it, and
+ * skips.
  */
 class ComponentContentContractTest {
     private fun sdkDir(): File {
@@ -51,6 +52,11 @@ class ComponentContentContractTest {
     /** `normaliseSelectAction`'s answer in its own words: `{}` for no tap, `args` only when there are some. */
     private fun tap(t: GraineComponentTap?): Map<String, Any?> = if (t == null) emptyMap() else linkedMapOf<String, Any?>(
         "path" to t.path, "action" to t.action, "args" to t.args.takeIf { it.isNotEmpty() }, "say" to t.say,
+    ).filterValues { it != null }
+
+    /** One block in `normaliseBlankBlocks`'s words: its id and type, and only the field its type uses. */
+    private fun block(b: GraineComponentBlock): Map<String, Any?> = linkedMapOf<String, Any?>(
+        "id" to b.id, "type" to b.type.wire, "content" to b.content, "imageUrl" to b.imageUrl,
     ).filterValues { it != null }
 
     // ── the answers, from the React Native SDK's own code ─────────────────
@@ -90,6 +96,19 @@ class ComponentContentContractTest {
         }
     }
 
+    @Test
+    fun everyBlockIsReadAsTheReactNativeSdkReadsIt() {
+        for (c in cases("blankBlocks")) {
+            val base = c["baseUrl"] as String
+            // As an app receives it: the component as the conversation sent it, its pictures then put on the agent's origin.
+            val sent = GraineComponent("w1", "blank", null, mapOf("widget_id" to "w1", "kind" to "blank", "data" to c["data"]))
+            val heard = ComponentImages.on(sent, base)
+            assertEquals("normaliseBlankBlocks(${Json.write(c["data"])}, \"$base\")", canon(c["output"]), canon(heard.blocks.map { block(it) }))
+            // Blocks are a "Start blank" component's alone: the same data under any other kind has none.
+            assertTrue("blocks on an info_card", GraineComponent("w1", "info_card", null, heard.payload).blocks.isEmpty())
+        }
+    }
+
     // ── the constants, from protocol.ts ───────────────────────────────────
 
     @Test
@@ -115,18 +134,28 @@ class ComponentContentContractTest {
         assertEquals("IMAGE_KEY", keys, ComponentImages.KEYS)
     }
 
-    // ── the blocks, from the dashboard ────────────────────────────────────
+    // ── the blocks' shape, from protocol.ts; the kind, from the dashboard ─
 
     @Test
-    fun theBlocksAreTheDashboardsOwn() {
+    fun theBlocksAreTheContractsOwn() {
+        val ts = source("inapp/protocol.ts")
+        val words = { s: String -> Regex(""""(\w+)"""").findAll(s).map { it.groupValues[1] }.toList() }
+        val union = (Regex("""export type WidgetBlockType\s*=([^;]+);""").find(ts) ?: error("protocol.ts declares no WidgetBlockType")).groupValues[1]
+        assertEquals("WidgetBlockType", words(union), GraineComponentBlockType.entries.map { it.wire })
+        val list = (Regex("""export const WIDGET_BLOCK_TYPES[^=]*=\s*\[([^\]]*)\]""").find(ts) ?: error("protocol.ts declares no WIDGET_BLOCK_TYPES")).groupValues[1]
+        assertEquals("WIDGET_BLOCK_TYPES", words(list), GraineComponentBlockType.entries.map { it.wire })
+        val block = (Regex("""export interface WidgetBlock \{([\s\S]*?)\n\}""").find(ts) ?: error("protocol.ts declares no WidgetBlock")).groupValues[1]
+        for (field in listOf("id", "type", "content", "imageUrl")) assertTrue("WidgetBlock.$field", Regex("""\b$field\??:""").containsMatchIn(block))
+
+        // The dashboard makes them — "Start blank", kind blank — in the contract's shape, re-exported rather than copied.
         val lib = source("../lib/web-widgets.ts")
         val kinds = (Regex("""export type WidgetKind\s*=([\s\S]*?);""").find(lib) ?: error("web-widgets.ts declares no WidgetKind")).groupValues[1]
         assertTrue("the kind \"Start blank\" makes", kinds.contains("\"${ComponentBlocks.KIND}\""))
         assertTrue(Regex("""kind:\s*"${ComponentBlocks.KIND}",\s*label:\s*"Start blank"""").containsMatchIn(lib))
         assertTrue("its data is its blocks", Regex("""export interface BlankData \{\s*blocks: BlankBlock\[\];""").containsMatchIn(lib))
-        val block = (Regex("""export interface BlankBlock \{([\s\S]*?)\n\}""").find(lib) ?: error("web-widgets.ts declares no BlankBlock")).groupValues[1]
-        val types = Regex(""""(\w+)"""").findAll(Regex("""type:\s*([^;]+);""").find(block)!!.groupValues[1]).map { it.groupValues[1] }.toList()
-        assertEquals("BlankBlock's types", types, GraineComponentBlockType.entries.map { it.wire })
-        for (field in listOf("id", "content", "imageUrl")) assertTrue("BlankBlock.$field", Regex("""\b$field\??:""").containsMatchIn(block))
+        assertTrue(
+            "BlankBlock is the contract's WidgetBlock",
+            Regex("""export type \{[^}]*\bWidgetBlock as BlankBlock\b[^}]*\} from "\.\./sdk/inapp/protocol\.ts"""").containsMatchIn(lib),
+        )
     }
 }

@@ -162,9 +162,10 @@ internal object ComponentTaps {
 /**
  * A COMPONENT BUILT FROM BLOCKS, AS THE DASHBOARD MAKES IT — "Start blank"
  * (kind `blank`), its `data.blocks`: `{ id, type: heading | text | image |
- * divider | button, content?, imageUrl? }` (the dashboard's BlankBlock). No
- * other SDK reads them yet; what is kept is what the dashboard's own preview
- * draws. Pure; never throws.
+ * divider | button, content?, imageUrl? }` (the dashboard's BlankBlock). What
+ * is kept is the contract's `normaliseBlankBlocks` (protocol.ts, pinned by
+ * rn-parity.json `blankBlocks`), the rule every Graine SDK and the dashboard's
+ * own preview follow. Pure; never throws.
  */
 internal object ComponentBlocks {
     /** The kind "Start blank" makes. */
