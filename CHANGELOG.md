@@ -1,3 +1,12 @@
+## 0.14.10
+
+- **The calls setup check names the app, not the agent.** `GraineCalls.callSetupProblems` reported `hosted_ringing_off`
+  with "no push credentials … are uploaded for this agent". Push credentials belong to the workspace, one set per app,
+  and Graine rings a phone only with the set saved for its own bundle ID (iOS) or package name (Android), so the
+  sentence now says the agent's workspace has none for this app. The code and its fix are unchanged.
+- Builds on the platforms' 0.14.9: link `GraineInApp` and `GraineInAppRTC` 0.14.9 in your iOS app; the Android side
+  builds on `ai.graine:inapp-android` 0.14.9 (and `inapp-android-rtc` 0.14.9 for calls over WebRTC).
+
 ## 0.14.9
 
 - **"Start blank" components appear in the SDK's own screens.** A component built with *Start blank* on the dashboard's *Web components* page — headings, text, pictures, dividers and buttons — is now drawn by the chat and the voice bar's call screen in the component's look (accent, corners, density, the button style, the picture size), on iOS and on Android, where it used to show only its fallback text. A button block answers the agent with its words, as the dashboard's preview does. Apps that draw components themselves keep reading `GraineComponent.blocks`, now checked against the same contract the native SDKs follow.
