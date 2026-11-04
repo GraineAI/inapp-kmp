@@ -141,6 +141,7 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
         unitTests.all { it.systemProperty("graine.version", project.version.toString()) }
+        unitTests.all { it.systemProperty("graine.iosVersion", providers.gradleProperty("GRAINE_IOS_VERSION").get()) }
         // The shared contract, where this library sits beside it in the monorepo (an exported checkout has none).
         rootProject.file("../contract").takeIf { it.isDirectory }?.let { contract ->
             unitTests.all { it.systemProperty("graine.contractDir", contract.absolutePath) }

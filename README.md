@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.14.10")
-            implementation("ai.graine:inapp-kmp-compose:0.14.10")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.14.11")
+            implementation("ai.graine:inapp-kmp-compose:0.14.11")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -75,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.14.9`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.14.10`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.14.9'`
-  (or `pod 'GraineInApp', '~> 0.14.9'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.14.9"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.14.10'`
+  (or `pod 'GraineInApp', '~> 0.14.10'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.14.10"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 If the iOS app's link fails with `Undefined symbol '_OBJC_CLASS_$_GraineObjC'` (or another
@@ -113,8 +113,8 @@ and the Android SDK it builds on beside it as `android` — 0.14.4 for this
 release (`GRAINE_ANDROID_VERSION` in its `gradle.properties`). From your project's root:
 
 ```bash
-git clone --branch 0.14.10 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.14.9 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.14.11 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.14.10 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -609,7 +609,10 @@ Graine.calls.callSetupProblems.forEach { println("${it.code}: ${it.message}") }
 `Graine.calls.callPermissions` reads them at any time; `allGranted` is true when
 each is granted or not needed. The codes: iOS `microphone_usage_missing`,
 `background_audio_missing`, `background_voip_missing`,
-`push_entitlement_missing`, `voip_pushes_not_enabled`, `no_voip_token`; Android
+`push_entitlement_missing`, `voip_pushes_not_enabled`, `no_voip_token`,
+`ios_sdk_older` (Xcode links an older `GraineInApp` than this library is built
+for; updating Kotlin does not update it, and the same sentence goes to the
+console at launch); Android
 `manifest_entry_missing`, `no_push_token`, `notifications_not_allowed`,
 `full_screen_not_allowed`; both `microphone_blocked`, `hosted_ringing_off`. A
 problem is never an exception: calls still work where they can. On iOS these
@@ -1074,8 +1077,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.14.9 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.14.9 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.14.10 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.14.10 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

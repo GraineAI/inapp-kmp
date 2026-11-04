@@ -1146,6 +1146,11 @@ class AndroidEngineTest {
         assertEquals(System.getProperty("graine.version"), GraineKmpVersion.NAME)
     }
 
+    @Test
+    fun theIosSdkItExpectsIsGradles() {
+        assertEquals(System.getProperty("graine.iosVersion"), LinkedIosSdk.EXPECTED)
+    }
+
     private companion object {
         /** A token set as the Android SDK writes one (ThemeTokens.toJson), dark. */
         val TOKENS = """{"v":1,"preset":"graine-classic","scheme":"dark","colors":{"background":"#0E0F11","surface":"#17181B",

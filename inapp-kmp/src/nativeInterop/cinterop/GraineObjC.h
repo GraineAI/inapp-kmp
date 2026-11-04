@@ -98,6 +98,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable GraineObjC *)current;
 + (nullable GraineObjC *)named:(NSString *)name;
 
+@property (nonatomic, readonly) NSString *sdkVersion;
 @property (nonatomic, readonly) NSString *installId;
 @property (nonatomic, readonly) BOOL memoryChoice;
 @property (nonatomic, readonly, nullable) NSString *sessionJSON;

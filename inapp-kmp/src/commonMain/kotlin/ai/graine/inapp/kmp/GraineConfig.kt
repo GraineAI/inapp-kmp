@@ -2,7 +2,7 @@ package ai.graine.inapp.kmp
 
 /** This library's version: what it says it is, the same on Android and iOS. */
 object GraineKmpVersion {
-    const val NAME = "0.14.10"
+    const val NAME = "0.14.11"
 }
 
 /**

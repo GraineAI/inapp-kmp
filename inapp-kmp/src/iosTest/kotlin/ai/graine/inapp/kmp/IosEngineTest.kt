@@ -63,6 +63,14 @@ class IosEngineTest {
     }
 
     @Test
+    fun theIosSdkLinkedHereSaysItsVersionAndRaisesNoProblem() {
+        // Linked at the version gradle.properties names, as an up-to-date app is: the real selector, read for real.
+        val problems = engine.callsSetupProblems()
+        assertEquals(LinkedIosSdk.EXPECTED, GraineObjC.current()!!.sdkVersion)
+        assertTrue(problems.none { it.code == LinkedIosSdk.PROBLEM_CODE }, problems.toString())
+    }
+
+    @Test
     fun bookingIsTheIosSdksAnswerReadThroughItsSelector() {
         // No session (the host never resolves) and so no ringing: the iOS SDK says no, through the selector the
         // engine checks first (a GraineInApp from before the booking sheet answers false the same way).

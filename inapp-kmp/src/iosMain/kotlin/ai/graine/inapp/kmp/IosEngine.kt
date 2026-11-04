@@ -8,6 +8,7 @@ import kotlinx.datetime.Instant
 import kotlinx.datetime.toKotlinInstant
 import kotlinx.datetime.toNSDate
 import platform.Foundation.NSError
+import platform.Foundation.NSLog
 import platform.Foundation.NSNumber
 import platform.Foundation.NSSelectorFromString
 
@@ -26,6 +27,8 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
 
     override fun start(sink: EngineSink) {
         this.sink = sink
+        // In the console from the first launch, debug or not: a developer reads this before anything else.
+        linkedIosSdkProblem()?.let { NSLog("[Graine] " + it.message.replace("%", "%%")) }
         registrations += facade.observeEvents { name, json -> onEvent(name, json) }
         registrations += facade.chat.observe { publishChat() }
         registrations += facade.calls.observe { publishCalls() }
@@ -377,7 +380,12 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
 
     override fun callsOpenSettings(item: GraineCallPermission): Boolean = facade.calls.openCallSettings(item.wire)
 
-    override fun callsSetupProblems(): List<GraineCallSetupProblem> = Bridge.problems(facade.calls.callSetupProblemsJSON)
+    override fun callsSetupProblems(): List<GraineCallSetupProblem> =
+        Bridge.problems(facade.calls.callSetupProblemsJSON) + listOfNotNull(linkedIosSdkProblem())
+
+    /** Xcode may have linked an older iOS SDK than this library is built for: LinkedIosSdk. */
+    private fun linkedIosSdkProblem(): GraineCallSetupProblem? =
+        LinkedIosSdk.problem(if (facade.respondsToSelector(SDK_VERSION)) facade.sdkVersion else null)
 
     private fun publishCalls() = sink.calls(Bridge.calls(facade.calls.snapshotJSON))
 
@@ -400,6 +408,7 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
 
     companion object {
         // The booking sheet's selectors, new in the facade after 0.7.0 (asked for before each use).
+        private val SDK_VERSION = NSSelectorFromString("sdkVersion")
         private val BOOKING_AVAILABLE = NSSelectorFromString("bookingAvailable")
         private val REPORT_EVENT = NSSelectorFromString("reportEvent:detail:dataJSON:")
         private val PRESENT_BOOKING = NSSelectorFromString("presentBookingWithReason:completion:")

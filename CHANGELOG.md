@@ -1,3 +1,13 @@
+## 0.14.11
+
+- **The app now says when Xcode links an older iOS SDK.** `inapp-kmp` and `GraineInApp` are separate dependencies: Gradle
+  resolves one and Xcode the other, so Kotlin can move forward while the iOS SDK stays behind, with no build error, and
+  the older SDK's bugs stay with it (calls that connect with no sound, for one). `GraineCalls.callSetupProblems` now
+  reports `ios_sdk_older` with both versions and the fix, and the same sentence goes to the Xcode console at launch,
+  with or without `debug`. Android is not affected.
+- Builds on the platforms' 0.14.10: link `GraineInApp` and `GraineInAppRTC` 0.14.10 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.14.10 (and `inapp-android-rtc` 0.14.10 for calls over WebRTC).
+
 ## 0.14.10
 
 - **The calls setup check names the app, not the agent.** `GraineCalls.callSetupProblems` reported `hosted_ringing_off`

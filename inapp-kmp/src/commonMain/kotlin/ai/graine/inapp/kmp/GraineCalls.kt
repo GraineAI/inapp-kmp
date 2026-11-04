@@ -535,7 +535,8 @@ class GraineCalls internal constructor() {
      * What the app's setup still lacks for calls, read now — each a stable
      * code and a sentence with the exact fix. iOS: an Info.plist entry or
      * background mode, the push entitlement, [enableVoIPPushes] never called
-     * or no VoIP token. Android: a manifest entry, no push token (Firebase
+     * or no VoIP token, or Xcode linking an older iOS SDK than this library is
+     * built for. Android: a manifest entry, no push token (Firebase
      * missing or not set up in the app, or [onNewToken] never called by an app
      * with its own messaging service), notifications or the full-screen ring
      * not allowed.
