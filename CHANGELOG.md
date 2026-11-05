@@ -1,3 +1,11 @@
+## 0.14.13
+
+- **A call the customer places reaches the agent's voice sooner** (iOS and Android 0.14.12): a tap no longer waits for what
+  the dial does not need.
+- **A call the person answers keeps its order, however long it rang.**
+- Builds on the platforms' 0.14.12: link `GraineInApp` and `GraineInAppRTC` 0.14.12 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.14.12 (and `inapp-android-rtc` 0.14.12 for calls over WebRTC).
+
 ## 0.14.12
 
 - **A call on an iPhone whose audio would not start now recovers** (`GraineInAppRTC` 0.14.11): the phone's audio unit is

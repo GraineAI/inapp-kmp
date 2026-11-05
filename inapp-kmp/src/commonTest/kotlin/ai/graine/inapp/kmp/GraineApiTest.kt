@@ -616,7 +616,7 @@ class GraineApiTest {
 
     @Test
     fun theVersionIsTheOneGradlePublishes() {
-        assertEquals("0.14.12", GraineKmpVersion.NAME)
+        assertEquals("0.14.13", GraineKmpVersion.NAME)
     }
 
     @Test

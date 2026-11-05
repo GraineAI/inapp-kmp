@@ -17,7 +17,7 @@ internal object LinkedIosSdk {
     const val PROBLEM_CODE = "ios_sdk_older"
 
     /** The iOS SDK this library is built for: GRAINE_IOS_VERSION in gradle.properties (bump-version moves both). */
-    const val EXPECTED = "0.14.11"
+    const val EXPECTED = "0.14.12"
 
     /** The first iOS SDK whose facade says its version. */
     const val FIRST_THAT_SAYS = "0.14.10"
