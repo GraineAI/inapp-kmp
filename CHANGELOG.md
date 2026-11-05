@@ -1,3 +1,10 @@
+## 0.14.12
+
+- **A call on an iPhone whose audio would not start now recovers** (`GraineInAppRTC` 0.14.11): the phone's audio unit is
+  asked for again at once, instead of the call ending after about 5 seconds with "The call's audio could not start."
+- Builds on the platforms' 0.14.11: link `GraineInApp` and `GraineInAppRTC` 0.14.11 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.14.11 (and `inapp-android-rtc` 0.14.11 for calls over WebRTC).
+
 ## 0.14.11
 
 - **The app now says when Xcode links an older iOS SDK.** `inapp-kmp` and `GraineInApp` are separate dependencies: Gradle
