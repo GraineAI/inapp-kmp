@@ -145,6 +145,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSObject *)chatViewControllerWithOnClose:(void (^ _Nullable)(void))onClose;
 - (NSObject *)callViewController;
 - (NSObject *)voiceBarViewControllerWithName:(nullable NSString *)name onClose:(void (^ _Nullable)(void))onClose;
+@property (nonatomic, readonly) NSString *avatarStateJSON;
+- (GraineObjCRegistration *)observeAvatar:(void (^)(NSString *json))observer;
+- (NSObject *)avatarView;
+- (void)setShowsAvatarOnCallScreen:(BOOL)on;
 @end
 
 NS_ASSUME_NONNULL_END

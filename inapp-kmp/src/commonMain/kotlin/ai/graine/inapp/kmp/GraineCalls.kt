@@ -407,6 +407,22 @@ class GraineCalls internal constructor() {
     val state: StateFlow<GraineCallInfo> = Graine.callInfo.asStateFlow()
 
     /**
+     * THE AGENT'S FACE ON THE SDK'S CALL SCREEN: off by default. On, and with
+     * the agent's face switched on in the dashboard, the platform SDK's call
+     * screen draws the face where the agent's picture goes, and the face
+     * carries the voice ([Graine.avatar]). Native calls need the platform's
+     * WebRTC module (GraineInAppRTC on iOS, inapp-android-rtc on Android) and a
+     * call on WebRTC; otherwise the call is voice-only, as it is with this off.
+     * Your own call screen: place [GraineAvatarFace] (inapp-kmp-compose).
+     */
+    var showsAvatar: Boolean
+        get() = Graine.showsAvatar
+        set(value) {
+            Graine.showsAvatar = value
+            if (Graine.isConfigured || Graine.agents.isNotEmpty()) runCatching { Graine.callsEngine().avatarSetShownOnCallScreen(value) }
+        }
+
+    /**
      * WHERE THE CALL IS, in the word every Graine SDK uses — [GraineCallInfo.phase]
      * of [state], as it changes: IDLE, RINGING, CALLING, CONNECTING, ACTIVE,
      * RECONNECTING, ENDED or MISSED. New in 0.14.5.

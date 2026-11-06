@@ -278,6 +278,9 @@ internal class AndroidEngine(
     override fun callsSetSpeaker(on: Boolean) = port.setCallSpeaker(on)
     override fun callsSetSpeakerByDefault(on: Boolean) = port.setSpeakerByDefault(on)
 
+    override fun avatarObserve(onState: (String) -> Unit): () -> Unit = port.observeAvatar(onState)
+    override fun avatarSetShownOnCallScreen(on: Boolean) = port.setShowsAvatar(on)
+
     override fun callsCallBack(): String? = onMainSync back@{
         val activity = frontActivity() ?: return@back null
         val m = missed

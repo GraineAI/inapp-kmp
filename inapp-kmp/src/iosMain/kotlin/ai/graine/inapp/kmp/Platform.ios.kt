@@ -11,6 +11,7 @@ import platform.Foundation.NSRecursiveLock
 import platform.Foundation.NSString
 import platform.Foundation.create
 import platform.Foundation.precomposedStringWithCanonicalMapping
+import platform.UIKit.UIView
 import platform.UIKit.UIViewController
 import kotlin.math.pow
 
@@ -106,6 +107,16 @@ object GraineViews {
     /** An agent's voice bar, drawn at the bottom of the view it fills. `onClose`: hung up, or closed with no call. */
     fun voiceBar(name: String? = null, onClose: (() -> Unit)? = null, agent: String = Graine.DEFAULT_AGENT): UIViewController =
         facade(agent).voiceBarViewControllerWithName(name, onClose) as UIViewController
+
+    /**
+     * A view that draws the agent's face during calls whose agent has one (the
+     * iOS SDK's GraineAvatarView) — transparent when there is none; null with
+     * an iOS SDK from before the face.
+     */
+    fun avatarView(): UIView? {
+        val f = facade(null)
+        return if (f.respondsToSelector(IosEngine.AVATAR_VIEW)) f.avatarView() as? UIView else null
+    }
 
     private fun facade(agent: String?): GraineObjC {
         val found = if (agent == null) GraineObjC.current() else GraineObjC.named(Graine.normalise(agent))

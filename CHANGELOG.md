@@ -1,3 +1,19 @@
+## 0.15.0
+
+- **The agent's face (Avatar).** When the agent has Avatar turned on in the dashboard, a call can show its live talking
+  face. Compose: `GraineAvatarFace(modifier)` from `ai.graine:inapp-kmp-compose`, where the face should go; follow
+  `Graine.avatar.state` (`OFF`, `AVAILABLE`, `LIVE`, with a `reason` when off). `Graine.calls.showsAvatar = true` lets
+  the SDK's own call screen draw it (off by default). Native calls need the platform's WebRTC module
+  (`inapp-android-rtc`, `GraineInAppRTC`) and a call on WebRTC; on iOS, update `GraineInApp` and `GraineInAppRTC` with
+  this version — an older iOS SDK simply has no face.
+- **The voice moves to the face at a pause, never mid-sentence,** and comes back to the call at once if the face's
+  connection drops for 2 seconds, it cannot be shown, or the avatar view leaves the screen. The customer never hears the
+  agent twice, and never hears nothing.
+- **Nothing changes for an app that does not place an avatar view:** a face nobody can see is never connected, and the call
+  stays voice-only, exactly as before.
+- Builds on the platforms' 0.15.0: link `GraineInApp` and `GraineInAppRTC` 0.15.0 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.15.0 (and `inapp-android-rtc` 0.15.0 for calls over WebRTC).
+
 ## 0.14.13
 
 - **A call the customer places reaches the agent's voice sooner** (iOS and Android 0.14.12): a tap no longer waits for what

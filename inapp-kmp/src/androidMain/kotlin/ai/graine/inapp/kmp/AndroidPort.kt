@@ -186,6 +186,10 @@ internal interface AndroidPort {
     fun setCallSpeaker(on: Boolean)
     /** Calls start on the loudspeaker unless a headset is connected (GraineCalls.speakerByDefault). */
     fun setSpeakerByDefault(on: Boolean)
+    /** The agent's face (GraineAvatar): its state as JSON, now and on every change; the returned function stops it. */
+    fun observeAvatar(onState: (String) -> Unit): () -> Unit = {}
+    /** The SDK's call screen draws the agent's face (GraineCalls.showsAvatar). */
+    fun setShowsAvatar(on: Boolean) {}
     /** The call permissions as the phone holds them (GraineCalls.callPermissions). */
     val callPermissions: NativeCallPermissions
     /** Ask over [activity] (null: the screen in front, as the SDK finds it); [done] gets the permissions after. */
@@ -328,6 +332,10 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun setCallMuted(muted: Boolean) = g.calls.setMuted(muted)
     override fun setCallSpeaker(on: Boolean) = g.calls.setSpeaker(on)
     override fun setSpeakerByDefault(on: Boolean) { g.calls.speakerByDefault = on }
+    override fun observeAvatar(onState: (String) -> Unit): () -> Unit =
+        // Each change is heard after the state is set: the JSON is that state's.
+        ai.graine.inapp.GraineAvatar.addListener { _ -> onState(ai.graine.inapp.GraineAvatar.stateJson()) }
+    override fun setShowsAvatar(on: Boolean) { g.calls.showsAvatar = on }
     override val callPermissions: NativeCallPermissions get() = g.calls.callPermissions
     override fun requestCallPermissions(activity: Activity?, done: (NativeCallPermissions) -> Unit) =
         g.calls.requestCallPermissions(activity) { done(it) }

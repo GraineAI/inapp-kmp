@@ -8,7 +8,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.UIKitInteropProperties
+import androidx.compose.ui.viewinterop.UIKitView
 import androidx.compose.ui.viewinterop.UIKitViewController
+import platform.UIKit.UIView
 
 /**
  * The SDK's screens are UIKit inside Compose, and by default Compose leaves an interop view out
@@ -46,4 +48,11 @@ actual fun GraineAgentBar(modifier: Modifier, name: String?, onClose: (() -> Uni
         modifier = modifier,
         properties = accessible,
     )
+}
+
+@Composable
+actual fun GraineAvatarFace(modifier: Modifier) {
+    if (Graine.agents.isEmpty()) return
+    // An iOS SDK from before the face has no view for it: an empty one keeps the layout.
+    UIKitView(factory = { GraineViews.avatarView() ?: UIView() }, modifier = modifier, properties = accessible)
 }

@@ -82,6 +82,11 @@ actual fun GraineAgentBar(modifier: Modifier, name: String?, onClose: (() -> Uni
     )
 }
 
+@Composable
+actual fun GraineAvatarFace(modifier: Modifier) {
+    AndroidView(factory = { context -> ai.graine.inapp.GraineAvatarView(context) }, modifier = modifier)
+}
+
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()

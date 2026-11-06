@@ -147,6 +147,15 @@ internal interface GraineEngine {
     fun voiceSetCaptionsOn(on: Boolean)
     /** Forget what has been said on the call, without ending it. */
     fun voiceClearCaptions()
+
+    /**
+     * THE AGENT'S FACE: hear the platform SDK's face state as JSON
+     * (`{"phase","reason"}`) now and on every change; the returned function
+     * stops it. A platform SDK from before the face never calls it.
+     */
+    fun avatarObserve(onState: (String) -> Unit): () -> Unit = {}
+    /** The platform SDK's own call screen draws the face (its `showsAvatar`). */
+    fun avatarSetShownOnCallScreen(on: Boolean) {}
 }
 
 /** Where a platform SDK reports. Any thread. */

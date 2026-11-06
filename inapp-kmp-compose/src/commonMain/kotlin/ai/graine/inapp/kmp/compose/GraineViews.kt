@@ -51,3 +51,20 @@ expect fun GraineCallScreen(modifier: Modifier = Modifier)
  */
 @Composable
 expect fun GraineAgentBar(modifier: Modifier = Modifier, name: String? = null, onClose: (() -> Unit)? = null, agent: String = Graine.DEFAULT_AGENT)
+
+/**
+ * THE AGENT'S FACE — where it is drawn. Place it in your layout (a square or
+ * portrait area reads best): during a call whose agent has a face (switched on
+ * in the dashboard) the face plays here and carries the agent's voice, in sync
+ * with its lips. Transparent when there is none — put your own picture of the
+ * agent behind it. Taking it off screen gives the voice back to the call at
+ * once; with none on screen the call is voice-only. Show it while
+ * `Graine.avatar.state.value.showsFace` for a face that appears with the call:
+ *
+ *     val face by Graine.avatar.state.collectAsState()
+ *     if (face.showsFace) GraineAvatarFace(Modifier.size(220.dp, 275.dp).clip(RoundedCornerShape(24.dp)))
+ *
+ * Native calls need the platform's WebRTC module; the assistant bar's calls do not.
+ */
+@Composable
+expect fun GraineAvatarFace(modifier: Modifier = Modifier)

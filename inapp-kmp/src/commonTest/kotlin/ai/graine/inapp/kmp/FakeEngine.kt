@@ -188,6 +188,14 @@ internal class FakeEngine : GraineEngine {
     override fun callsSetMuted(muted: Boolean) { calls += "callMuted:$muted" }
     override fun callsSetSpeaker(on: Boolean) { calls += "speaker:$on" }
     /** What the platform was told of GraineCalls.speakerByDefault, in order. */
+    var avatarListener: ((String) -> Unit)? = null
+    val avatarShown = mutableListOf<Boolean>()
+    override fun avatarObserve(onState: (String) -> Unit): () -> Unit {
+        avatarListener = onState
+        return { avatarListener = null }
+    }
+    override fun avatarSetShownOnCallScreen(on: Boolean) { avatarShown += on }
+
     val speakerDefaults = mutableListOf<Boolean>()
     override fun callsSetSpeakerByDefault(on: Boolean) { speakerDefaults += on }
     override fun callsCallBack(): String? { calls += "callBack"; return "call_2" }

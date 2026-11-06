@@ -42,6 +42,12 @@ object Graine {
     internal val callOutcomes = MutableSharedFlow<GraineCallOutcome>(extraBufferCapacity = 32, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     internal val incomingCalls = MutableSharedFlow<GraineIncomingCall>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
+    /** [GraineAvatar.state]: the platform SDK's face, as the engine that reports the calls says. */
+    internal val avatarState = MutableStateFlow(GraineAvatarState.OFF)
+
+    /** [GraineCalls.showsAvatar], kept here so one set before configure reaches the engine made after. */
+    @Volatile internal var showsAvatar: Boolean = false
+
     /** [GraineCalls.speakerByDefault], kept here so one set before configure reaches every engine made after. */
     @Volatile internal var speakerByDefault: Boolean = true
 
@@ -100,12 +106,18 @@ object Graine {
 
     /** The engine for an agent; tests install fakes. */
     internal fun install(agent: GraineAgent, engine: GraineEngine) {
-        if (callsReporter == null) callsReporter = agent
+        val reportsCalls = callsReporter == null
+        if (reportsCalls) callsReporter = agent
         // What the app chose before this agent was configured reaches its platform SDK before anything else does.
         debugTokenModeChosen?.let { engine.debugTokenMode = it }
         tokenRefresher?.let { engine.setIdentityTokenRefresher(IdentityTokens.bridge(it)) }
         agent.install(engine)
         engine.callsSetSpeakerByDefault(speakerByDefault)
+        if (reportsCalls) {
+            // The face is the app's, whichever agent a call is with: heard from the engine that reports the calls.
+            engine.avatarSetShownOnCallScreen(showsAvatar)
+            engine.avatarObserve { json -> avatarState.value = GraineAvatarState.fromJson(json) }
+        }
     }
 
     /** Every configured agent's engine, in the order they were configured. */
@@ -200,6 +212,9 @@ object Graine {
 
     /** Native calls — the app's, whichever agent a call is with. */
     val calls: GraineCalls = GraineCalls()
+
+    /** The agent's face on calls — the app's, whichever agent a call is with. */
+    val avatar: GraineAvatar = GraineAvatar()
 
     /** The default agent's prompt variables. See [GraineAgent.setVariables]. */
     fun setVariables(values: Map<String, Any?>?) = defaultAgent.setVariables(values)
@@ -472,6 +487,8 @@ object Graine {
         callsReporter = null
         publishCall(GraineCallInfo())
         speakerByDefault = true
+        showsAvatar = false
+        avatarState.value = GraineAvatarState.OFF
         debugTokenModeChosen = null
         tokenRefresher = null
         engineFactory = ::createPlatformEngine

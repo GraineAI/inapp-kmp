@@ -19,8 +19,8 @@ kotlin {
     iosArm64(); iosSimulatorArm64(); iosX64()
     sourceSets {
         commonMain.dependencies {
-            implementation("ai.graine:inapp-kmp:0.14.13")
-            implementation("ai.graine:inapp-kmp-compose:0.14.13")   // the chat, call screen and voice bar for Compose Multiplatform
+            implementation("ai.graine:inapp-kmp:0.15.0")
+            implementation("ai.graine:inapp-kmp-compose:0.15.0")   // the chat, call screen and voice bar for Compose Multiplatform
         }
     }
 }
@@ -75,14 +75,14 @@ iOS 15 and up. The iOS side calls Graine's iOS SDK (`GraineInApp`), which your
 app links — so it is never in your app twice:
 
 - **Swift Package Manager**: in Xcode, *File → Add Package Dependencies…*,
-  `https://github.com/GraineAI/inapp-ios`, from `0.14.12`, added to the app
+  `https://github.com/GraineAI/inapp-ios`, from `0.15.0`, added to the app
   target. Build your shared framework as a static framework
   (`binaries.framework { isStatic = true }`, the Compose Multiplatform
   default); the app's link resolves it against the package.
 - **CocoaPods**: in the app's `Podfile`,
-  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.14.12'`
-  (or `pod 'GraineInApp', '~> 0.14.12'`). With Kotlin's CocoaPods plugin, declare it
-  in the shared module instead: `pod("GraineInApp") { version = "0.14.12"; linkOnly = true }`
+  `pod 'GraineInApp', :git => 'https://github.com/GraineAI/inapp-ios.git', :tag => '0.15.0'`
+  (or `pod 'GraineInApp', '~> 0.15.0'`). With Kotlin's CocoaPods plugin, declare it
+  in the shared module instead: `pod("GraineInApp") { version = "0.15.0"; linkOnly = true }`
   for a dynamic framework, or keep the `Podfile` line for a static one.
 
 If the iOS app's link fails with `Undefined symbol '_OBJC_CLASS_$_GraineObjC'` (or another
@@ -113,8 +113,8 @@ and the Android SDK it builds on beside it as `android` — 0.14.4 for this
 release (`GRAINE_ANDROID_VERSION` in its `gradle.properties`). From your project's root:
 
 ```bash
-git clone --branch 0.14.13 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
-git clone --branch 0.14.12 https://github.com/GraineAI/inapp-android ../graine-sdk/android
+git clone --branch 0.15.0 https://github.com/GraineAI/inapp-kmp ../graine-sdk/kmp
+git clone --branch 0.15.0 https://github.com/GraineAI/inapp-android ../graine-sdk/android
 ```
 
 then include the build in your app's `settings.gradle.kts`, in place of the
@@ -650,6 +650,30 @@ bandwidth today. Size, per phone: about
 BSD 3-Clause with Google's patent grant — list it in your app's open-source
 licences.
 
+## The agent's face (Avatar)
+
+When the agent has **Avatar** turned on in the dashboard (Embed & Widgets → Appearance), a call can show the
+agent's live talking face. It speaks with the agent's own voice, its lips in sync with every word: while it is on screen the call's
+own copy of the voice is silenced, and the voice moves to the face only at a pause. If the face's connection
+drops for 2 seconds, it cannot be shown, or your view leaves the screen, the call's voice comes back at once —
+the customer never hears the agent twice, and never hears nothing. With no avatar view on screen, nothing is
+connected and the call is voice-only, exactly as before. Avatar minutes are charged on top of the call, only
+while the face is on screen (see Avatar in the docs).
+
+```kotlin
+val face by Graine.avatar.state.collectAsState()
+Box(Modifier.size(220.dp, 275.dp).clip(RoundedCornerShape(24.dp))) {
+    Image(painterResource(Res.drawable.agent), null, contentScale = ContentScale.Crop)   // drawn when there is no face
+    if (face.showsFace) GraineAvatarFace(Modifier.matchParentSize())                       // ai.graine:inapp-kmp-compose
+}
+```
+
+`Graine.avatar.state` is `OFF`, `AVAILABLE` (show your view) or `LIVE` (the face carries the voice), with a
+`reason` when off. `Graine.calls.showsAvatar = true` lets the SDK's own call screen draw the face (off by
+default). Native calls need the platform's WebRTC module — `ai.graine:inapp-android-rtc` on Android,
+`GraineInAppRTC` on iOS — and a call on WebRTC; assistant-bar calls need nothing more. On iOS, link
+`GraineInApp` and `GraineInAppRTC` at this version: an older iOS SDK simply has no face.
+
 ## Scheduled calls
 
 ```kotlin
@@ -1077,8 +1101,8 @@ On a Mac with Xcode, JDK 17 and `ANDROID_HOME` set, with the Android and iOS
 SDKs of the same version cloned beside this folder as `android` and `ios`:
 
 ```bash
-git clone --branch 0.14.12 https://github.com/GraineAI/inapp-android ../android
-git clone --branch 0.14.12 https://github.com/GraineAI/inapp-ios ../ios
+git clone --branch 0.15.0 https://github.com/GraineAI/inapp-android ../android
+git clone --branch 0.15.0 https://github.com/GraineAI/inapp-ios ../ios
 ./gradlew build -x iosX64Test -x iosSimulatorArm64Test   # every target, the JVM tests and lint
 opts=$(scripts/ios-test-library.sh)                       # GraineInApp from ../ios, a static library for the simulator
 ./gradlew :inapp-kmp:iosSimulatorArm64Test -Pgraine.iosTestLinkerOpts="$opts" -Pgraine.simulator=<device>

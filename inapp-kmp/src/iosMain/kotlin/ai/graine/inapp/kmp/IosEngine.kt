@@ -370,6 +370,17 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
     override fun callsSetSpeakerByDefault(on: Boolean) {
         if (facade.calls.respondsToSelector(SET_SPEAKER_BY_DEFAULT)) facade.calls.speakerByDefault = on
     }
+    // The agent's face (an iOS SDK from before it answers none of these: no face, nothing changes).
+    override fun avatarObserve(onState: (String) -> Unit): () -> Unit {
+        if (!facade.respondsToSelector(OBSERVE_AVATAR)) return {}
+        val registration = facade.observeAvatar { json -> onState(json ?: "") }
+        return { registration.unregister() }
+    }
+
+    override fun avatarSetShownOnCallScreen(on: Boolean) {
+        if (facade.respondsToSelector(SET_SHOWS_AVATAR)) facade.setShowsAvatarOnCallScreen(on)
+    }
+
     override fun callsCallBack(): String? = facade.calls.callBack()
     override fun callsDismissMissed() = facade.calls.dismissMissedCall()
 
@@ -434,6 +445,9 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val BOOKING_UNAVAILABLE_REASON = NSSelectorFromString("bookingUnavailableReason")
         private val BOOKING_SLOTS = NSSelectorFromString("bookingSlotsJSONForDay:")
         private val SET_SPEAKER_BY_DEFAULT = NSSelectorFromString("setSpeakerByDefault:")
+        private val OBSERVE_AVATAR = NSSelectorFromString("observeAvatar:")
+        private val SET_SHOWS_AVATAR = NSSelectorFromString("setShowsAvatarOnCallScreen:")
+        internal val AVATAR_VIEW = NSSelectorFromString("avatarView")
         // New in the facade in 0.14.3 (asked for before each use).
         private val PAST_SESSIONS_JSON = NSSelectorFromString("pastSessionsJSON")
         private val REFRESH_PAST_SESSIONS = NSSelectorFromString("refreshPastSessions")
