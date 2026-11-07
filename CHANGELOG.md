@@ -1,3 +1,11 @@
+## 0.15.2
+
+- **The agent's face shows on iOS.** `Graine.avatar.state` now follows the face for the whole session: it keeps its
+  subscription to the iOS SDK, which before iOS 0.15.2 ended it, so the app never heard the face become available and
+  `GraineAvatarFace` was never placed. Nothing to change in your code.
+- Builds on the platforms' 0.15.2: link `GraineInApp` and `GraineInAppRTC` 0.15.2 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.15.2 (unchanged from 0.15.1).
+
 ## 0.15.1
 
 - **Talk works on an agent that admits only your apps** (iOS and Android 0.15.1): the voice bar's call page asks the

@@ -104,6 +104,9 @@ object Graine {
     /** Whether the default agent is configured. */
     val isConfigured: Boolean get() = defaultAgent.isConfigured
 
+    /** The face's subscription on the engine that reports the calls: kept until another replaces it. */
+    private var avatarObservation: (() -> Unit)? = null
+
     /** The engine for an agent; tests install fakes. */
     internal fun install(agent: GraineAgent, engine: GraineEngine) {
         val reportsCalls = callsReporter == null
@@ -116,7 +119,10 @@ object Graine {
         if (reportsCalls) {
             // The face is the app's, whichever agent a call is with: heard from the engine that reports the calls.
             engine.avatarSetShownOnCallScreen(showsAvatar)
-            engine.avatarObserve { json -> avatarState.value = GraineAvatarState.fromJson(json) }
+            // Kept: an iOS SDK before 0.15.2 ended the subscription with this registration, and the app never heard
+            // the face become available (no avatar view was placed, no face shown).
+            avatarObservation?.invoke()
+            avatarObservation = engine.avatarObserve { json -> avatarState.value = GraineAvatarState.fromJson(json) }
         }
     }
 
