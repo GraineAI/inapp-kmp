@@ -222,6 +222,22 @@ internal interface AndroidPort {
     fun setVoiceMuted(muted: Boolean)
     fun setVoiceCaptionsOn(on: Boolean)
     fun clearVoiceCaptions()
+
+    // The face stage (GraineInApp.stage, 0.15.4).
+    /** The stage's state as JSON (GraineStage.stateJson), now and on every change, on the main thread; the returned function stops it. */
+    fun observeStage(onState: (String) -> Unit): () -> Unit = {}
+    /** The stage's Call button, placed from [activity] (null: as the SDK finds one). */
+    fun stageCall(activity: Activity?) {}
+    fun stageAnswer() {}
+    fun stageEnd() {}
+    fun stageSetMuted(muted: Boolean) {}
+    fun stageSetSpeaker(on: Boolean) {}
+    /** The header's words (GraineStage.name, .role); null: the dashboard's. */
+    fun stageSetWords(name: String?, role: String?) {}
+    /** What the Call button places (GraineStage.calls): native calls, else the voice bar's. */
+    fun stageSetCalls(native: Boolean) {}
+    /** The app's chat (GraineStage.onChat): the Chat button is drawn only with one. */
+    fun stageSetChat(onChat: (() -> Unit)?) {}
 }
 
 /** [AndroidPort] on the real SDK: the agent [g]. */
@@ -360,4 +376,20 @@ internal class RealAndroidPort(private val g: GraineInApp) : AndroidPort {
     override fun setVoiceMuted(muted: Boolean) = g.voice.setMuted(muted)
     override fun setVoiceCaptionsOn(on: Boolean) = g.voice.setCaptionsOn(on)
     override fun clearVoiceCaptions() = g.voice.clearCaptions()
+
+    // Each change is heard after the state is set: the JSON is that state's (heard at once, too).
+    override fun observeStage(onState: (String) -> Unit): () -> Unit = g.stage.addListener { _ -> onState(g.stage.stateJson()) }
+    override fun stageCall(activity: Activity?) = g.stage.call(activity)
+    override fun stageAnswer() = g.stage.answer()
+    override fun stageEnd() = g.stage.end()
+    override fun stageSetMuted(muted: Boolean) = g.stage.setMuted(muted)
+    override fun stageSetSpeaker(on: Boolean) = g.stage.setSpeaker(on)
+    override fun stageSetWords(name: String?, role: String?) {
+        g.stage.name = name
+        g.stage.role = role
+    }
+    override fun stageSetCalls(native: Boolean) {
+        g.stage.calls = if (native) ai.graine.inapp.GraineStageCalls.NATIVE else ai.graine.inapp.GraineStageCalls.VOICE
+    }
+    override fun stageSetChat(onChat: (() -> Unit)?) { g.stage.onChat = onChat }
 }

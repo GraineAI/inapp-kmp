@@ -1,12 +1,15 @@
 package ai.graine.inapp.kmp.compose
 
 import ai.graine.inapp.GraineAgentBarView
+import ai.graine.inapp.GraineAvatarStageView
 import ai.graine.inapp.GraineCallActivity
 import ai.graine.inapp.GraineCalls
 import ai.graine.inapp.GraineChatView
 import ai.graine.inapp.GraineInApp
+import ai.graine.inapp.GraineStageCalls as NativeStageCalls
 import ai.graine.inapp.kmp.Graine
 import ai.graine.inapp.kmp.GraineCallState
+import ai.graine.inapp.kmp.GraineStageCalls
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -16,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -85,6 +89,34 @@ actual fun GraineAgentBar(modifier: Modifier, name: String?, onClose: (() -> Uni
 @Composable
 actual fun GraineAvatarFace(modifier: Modifier) {
     AndroidView(factory = { context -> ai.graine.inapp.GraineAvatarView(context) }, modifier = modifier)
+}
+
+@Composable
+actual fun GraineAvatarStage(modifier: Modifier, name: String?, role: String?, calls: GraineStageCalls, onChat: (() -> Unit)?, onClose: (() -> Unit)?) {
+    // The default agent's, as Graine.stage is: the app's one call over the face.
+    val native = nativeAgent(Graine.DEFAULT_AGENT) ?: return
+    val chat by rememberUpdatedState(onChat)
+    val close by rememberUpdatedState(onClose)
+    // Without onChat the stage draws no Chat button; without onClose, no close control. One function each while
+    // they are given, so a recomposition hands the view the same ones.
+    val hasChat = onChat != null
+    val hasClose = onClose != null
+    val chatFn = remember(hasChat) { if (hasChat) ({ chat?.invoke(); Unit }) else null }
+    val closeFn = remember(hasClose) { if (hasClose) ({ close?.invoke(); Unit }) else null }
+    val placed = if (calls == GraineStageCalls.NATIVE) NativeStageCalls.NATIVE else NativeStageCalls.VOICE
+    AndroidView(
+        // It mounts the voice engine in its own activity when it appears, if nothing has (autoAttach).
+        factory = { context -> GraineAvatarStageView(context).apply { graine = native } },
+        modifier = modifier,
+        update = { stage ->
+            stage.graine = native
+            if (stage.name != name) stage.name = name
+            if (stage.role != role) stage.role = role
+            if (stage.calls != placed) stage.calls = placed
+            if (stage.onChat !== chatFn) stage.onChat = chatFn
+            if (stage.onClose !== closeFn) stage.onClose = closeFn
+        },
+    )
 }
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {

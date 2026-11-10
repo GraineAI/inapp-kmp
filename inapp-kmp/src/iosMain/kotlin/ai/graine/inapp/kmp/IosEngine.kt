@@ -381,6 +381,45 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         if (facade.respondsToSelector(SET_SHOWS_AVATAR)) facade.setShowsAvatarOnCallScreen(on)
     }
 
+    // The face stage (an iOS SDK from before 0.15.4 answers none of these: the stage stays idle, nothing changes).
+    override fun stageObserve(onState: (String) -> Unit): () -> Unit {
+        if (!facade.respondsToSelector(OBSERVE_STAGE)) return {}
+        val registration = facade.observeStage { json -> onState(json ?: "") }
+        return { registration.unregister() }
+    }
+
+    override fun stageCall() {
+        if (facade.respondsToSelector(STAGE_CALL)) facade.stageCall()
+    }
+
+    override fun stageAnswer() {
+        if (facade.respondsToSelector(STAGE_ANSWER)) facade.stageAnswer()
+    }
+
+    override fun stageEnd() {
+        if (facade.respondsToSelector(STAGE_END)) facade.stageEnd()
+    }
+
+    override fun stageSetMuted(muted: Boolean) {
+        if (facade.respondsToSelector(STAGE_SET_MUTED)) facade.stageSetMuted(muted)
+    }
+
+    override fun stageSetSpeaker(on: Boolean) {
+        if (facade.respondsToSelector(STAGE_SET_SPEAKER)) facade.stageSetSpeaker(on)
+    }
+
+    override fun stageSetWords(name: String?, role: String?) {
+        if (facade.respondsToSelector(SET_STAGE_WORDS)) facade.setStageName(name, role)
+    }
+
+    override fun stageSetCalls(calls: String) {
+        if (facade.respondsToSelector(SET_STAGE_CALLS)) facade.setStageCalls(calls)
+    }
+
+    override fun stageSetChat(onChat: (() -> Unit)?) {
+        if (facade.respondsToSelector(SET_STAGE_CHAT)) facade.setStageChat(onChat)
+    }
+
     override fun callsCallBack(): String? = facade.calls.callBack()
     override fun callsDismissMissed() = facade.calls.dismissMissedCall()
 
@@ -448,6 +487,17 @@ internal class IosEngine(private val facade: GraineObjC) : GraineEngine {
         private val OBSERVE_AVATAR = NSSelectorFromString("observeAvatar:")
         private val SET_SHOWS_AVATAR = NSSelectorFromString("setShowsAvatarOnCallScreen:")
         internal val AVATAR_VIEW = NSSelectorFromString("avatarView")
+        // New in the facade in 0.15.4: the face stage (asked for before each use).
+        private val OBSERVE_STAGE = NSSelectorFromString("observeStage:")
+        private val STAGE_CALL = NSSelectorFromString("stageCall")
+        private val STAGE_ANSWER = NSSelectorFromString("stageAnswer")
+        private val STAGE_END = NSSelectorFromString("stageEnd")
+        private val STAGE_SET_MUTED = NSSelectorFromString("stageSetMuted:")
+        private val STAGE_SET_SPEAKER = NSSelectorFromString("stageSetSpeaker:")
+        private val SET_STAGE_WORDS = NSSelectorFromString("setStageName:role:")
+        private val SET_STAGE_CALLS = NSSelectorFromString("setStageCalls:")
+        private val SET_STAGE_CHAT = NSSelectorFromString("setStageChat:")
+        internal val AVATAR_STAGE_VIEW = NSSelectorFromString("avatarStageViewControllerWithName:role:calls:onChat:onClose:")
         // New in the facade in 0.14.3 (asked for before each use).
         private val PAST_SESSIONS_JSON = NSSelectorFromString("pastSessionsJSON")
         private val REFRESH_PAST_SESSIONS = NSSelectorFromString("refreshPastSessions")

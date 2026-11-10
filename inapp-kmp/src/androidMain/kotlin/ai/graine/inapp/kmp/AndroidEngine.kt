@@ -281,6 +281,19 @@ internal class AndroidEngine(
     override fun avatarObserve(onState: (String) -> Unit): () -> Unit = port.observeAvatar(onState)
     override fun avatarSetShownOnCallScreen(on: Boolean) = port.setShowsAvatar(on)
 
+    // ── the face stage (GraineInApp.stage): its state as the SDK's JSON, its buttons on the main thread ──
+
+    override fun stageObserve(onState: (String) -> Unit): () -> Unit = port.observeStage(onState)
+    /** From the activity in front: the voice engine mounts there if nothing has, and a native call is placed from it. */
+    override fun stageCall() = onMain { port.stageCall(frontActivity()) }
+    override fun stageAnswer() = onMain { port.stageAnswer() }
+    override fun stageEnd() = onMain { port.stageEnd() }
+    override fun stageSetMuted(muted: Boolean) = onMain { port.stageSetMuted(muted) }
+    override fun stageSetSpeaker(on: Boolean) = onMain { port.stageSetSpeaker(on) }
+    override fun stageSetWords(name: String?, role: String?) = onMain { port.stageSetWords(name, role) }
+    override fun stageSetCalls(calls: String) = onMain { port.stageSetCalls(calls == GraineStageCalls.NATIVE.wire) }
+    override fun stageSetChat(onChat: (() -> Unit)?) = onMain { port.stageSetChat(onChat) }
+
     override fun callsCallBack(): String? = onMainSync back@{
         val activity = frontActivity() ?: return@back null
         val m = missed

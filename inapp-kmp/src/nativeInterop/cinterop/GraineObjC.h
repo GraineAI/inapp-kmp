@@ -149,6 +149,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (GraineObjCRegistration *)observeAvatar:(void (^)(NSString *json))observer;
 - (NSObject *)avatarView;
 - (void)setShowsAvatarOnCallScreen:(BOOL)on;
+// The face stage (iOS SDK 0.15.4; asked for with respondsToSelector: before each use).
+@property (nonatomic, readonly) NSString *stageStateJSON;
+- (GraineObjCRegistration *)observeStage:(void (^)(NSString *json))observer;
+- (void)stageCall;
+- (void)stageAnswer;
+- (void)stageEnd;
+- (void)stageSetMuted:(BOOL)muted;
+- (void)stageSetSpeaker:(BOOL)on;
+- (void)setStageName:(nullable NSString *)name role:(nullable NSString *)role;
+- (void)setStageCalls:(NSString *)calls;
+- (void)setStageChat:(void (^ _Nullable)(void))onChat;
+- (NSObject *)avatarStageViewControllerWithName:(nullable NSString *)name role:(nullable NSString *)role calls:(nullable NSString *)calls onChat:(void (^ _Nullable)(void))onChat onClose:(void (^ _Nullable)(void))onClose;
 @end
 
 NS_ASSUME_NONNULL_END

@@ -48,6 +48,15 @@ object Graine {
     /** [GraineCalls.showsAvatar], kept here so one set before configure reaches the engine made after. */
     @Volatile internal var showsAvatar: Boolean = false
 
+    /** [GraineStage.state]: the default agent's face stage, as its platform SDK decides it. */
+    internal val stageState = MutableStateFlow(GraineStageState.IDLE)
+
+    /** [GraineStage]'s settings, kept here so ones set before configure reach the engine made after. */
+    @Volatile internal var stageName: String? = null
+    @Volatile internal var stageRole: String? = null
+    @Volatile internal var stageCalls: GraineStageCalls = GraineStageCalls.VOICE
+    @Volatile internal var stageOnChat: (() -> Unit)? = null
+
     /** [GraineCalls.speakerByDefault], kept here so one set before configure reaches every engine made after. */
     @Volatile internal var speakerByDefault: Boolean = true
 
@@ -107,6 +116,12 @@ object Graine {
     /** The face's subscription on the engine that reports the calls: kept until another replaces it. */
     private var avatarObservation: (() -> Unit)? = null
 
+    /** The face stage's subscription on the default agent's engine: kept until another replaces it. */
+    private var stageObservation: (() -> Unit)? = null
+
+    /** The default agent's engine: the one the face stage follows and drives. */
+    internal fun stageEngine(): GraineEngine? = defaultAgent.engineOrNull()
+
     /** The engine for an agent; tests install fakes. */
     internal fun install(agent: GraineAgent, engine: GraineEngine) {
         val reportsCalls = callsReporter == null
@@ -123,6 +138,14 @@ object Graine {
             // the face become available (no avatar view was placed, no face shown).
             avatarObservation?.invoke()
             avatarObservation = engine.avatarObserve { json -> avatarState.value = GraineAvatarState.fromJson(json) }
+        }
+        if (agent === defaultAgent) {
+            // The face stage follows the default agent: what the app set before configure reaches it first.
+            engine.stageSetWords(stageName, stageRole)
+            engine.stageSetCalls(stageCalls.wire)
+            engine.stageSetChat(stageOnChat)
+            stageObservation?.invoke()
+            stageObservation = engine.stageObserve { json -> stageState.value = GraineStageState.fromJson(json) }
         }
     }
 
@@ -221,6 +244,9 @@ object Graine {
 
     /** The agent's face on calls — the app's, whichever agent a call is with. */
     val avatar: GraineAvatar = GraineAvatar()
+
+    /** The face stage — the call drawn over the agent's face — of the default agent, as state. New in 0.15.4. */
+    val stage: GraineStage = GraineStage()
 
     /** The default agent's prompt variables. See [GraineAgent.setVariables]. */
     fun setVariables(values: Map<String, Any?>?) = defaultAgent.setVariables(values)
@@ -495,6 +521,14 @@ object Graine {
         speakerByDefault = true
         showsAvatar = false
         avatarState.value = GraineAvatarState.OFF
+        // The old engine's stage is no longer heard.
+        stageObservation?.invoke()
+        stageObservation = null
+        stageState.value = GraineStageState.IDLE
+        stageName = null
+        stageRole = null
+        stageCalls = GraineStageCalls.VOICE
+        stageOnChat = null
         debugTokenModeChosen = null
         tokenRefresher = null
         engineFactory = ::createPlatformEngine

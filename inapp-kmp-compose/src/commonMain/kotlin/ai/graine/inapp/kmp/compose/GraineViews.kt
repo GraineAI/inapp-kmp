@@ -1,6 +1,7 @@
 package ai.graine.inapp.kmp.compose
 
 import ai.graine.inapp.kmp.Graine
+import ai.graine.inapp.kmp.GraineStageCalls
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 
@@ -68,3 +69,31 @@ expect fun GraineAgentBar(modifier: Modifier = Modifier, name: String? = null, o
  */
 @Composable
 expect fun GraineAvatarFace(modifier: Modifier = Modifier)
+
+/**
+ * THE FACE STAGE — the agent's face edge to edge, with the call drawn over it:
+ * the name, the role, the LIVE mark and the clock at the top; the line being
+ * said, the component the agent drew and the call's buttons (Call; Mute, Chat,
+ * End, Speaker) at the bottom. Give it the screen. It places the default
+ * agent's voice bar call ([calls] `NATIVE` places native calls), mounts the
+ * voice engine itself, and never ends a call by going away. Before the face's
+ * first frame, and on a call without one, the brand's picture of the agent
+ * stands in its place. [name] and [role]: the header's words (null: the
+ * dashboard's). [onChat]: your chat — the Chat button is drawn only with one.
+ * [onClose]: a close control leading the header, for a stage shown full screen
+ * (null: none); it never ends a call — take the stage away there.
+ *
+ *     composable("agent") { GraineAvatarStage(Modifier.fillMaxSize(), role = "AI care assistant", onChat = { nav.navigate("chat") }) }
+ *
+ * Everything it draws is [Graine.stage]: draw your own over [GraineAvatarFace]
+ * instead — the face draws inside it, so anything above it is drawn over the face.
+ */
+@Composable
+expect fun GraineAvatarStage(
+    modifier: Modifier = Modifier,
+    name: String? = null,
+    role: String? = null,
+    calls: GraineStageCalls = GraineStageCalls.VOICE,
+    onChat: (() -> Unit)? = null,
+    onClose: (() -> Unit)? = null,
+)

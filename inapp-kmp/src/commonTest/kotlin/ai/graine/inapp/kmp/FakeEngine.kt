@@ -196,6 +196,26 @@ internal class FakeEngine : GraineEngine {
     }
     override fun avatarSetShownOnCallScreen(on: Boolean) { avatarShown += on }
 
+    /** The face stage's listener, and what the stage was told and asked, in order. */
+    var stageListener: ((String) -> Unit)? = null
+    val stageAsked = mutableListOf<String>()
+    var stageChat: (() -> Unit)? = null
+    override fun stageObserve(onState: (String) -> Unit): () -> Unit {
+        stageListener = onState
+        return { stageListener = null }
+    }
+    override fun stageCall() { stageAsked += "call" }
+    override fun stageAnswer() { stageAsked += "answer" }
+    override fun stageEnd() { stageAsked += "end" }
+    override fun stageSetMuted(muted: Boolean) { stageAsked += "muted:$muted" }
+    override fun stageSetSpeaker(on: Boolean) { stageAsked += "speaker:$on" }
+    override fun stageSetWords(name: String?, role: String?) { stageAsked += "words:$name|$role" }
+    override fun stageSetCalls(calls: String) { stageAsked += "calls:$calls" }
+    override fun stageSetChat(onChat: (() -> Unit)?) {
+        stageChat = onChat
+        stageAsked += "chat:${onChat != null}"
+    }
+
     val speakerDefaults = mutableListOf<Boolean>()
     override fun callsSetSpeakerByDefault(on: Boolean) { speakerDefaults += on }
     override fun callsCallBack(): String? { calls += "callBack"; return "call_2" }

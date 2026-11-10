@@ -118,6 +118,25 @@ object GraineViews {
         return if (f.respondsToSelector(IosEngine.AVATAR_VIEW)) f.avatarView() as? UIView else null
     }
 
+    /**
+     * The face stage (the iOS SDK's GraineAvatarStage): the agent's face edge to
+     * edge with the header, the line being said, the component and the call's
+     * buttons over it. `calls`: what the Call button places. `onChat`: your chat
+     * (null: no Chat button). `onClose`: a close control leading the header (null:
+     * none); it never ends a call. Null with an iOS SDK from before 0.15.4.
+     */
+    fun avatarStage(
+        name: String? = null,
+        role: String? = null,
+        calls: GraineStageCalls = GraineStageCalls.VOICE,
+        onChat: (() -> Unit)? = null,
+        onClose: (() -> Unit)? = null,
+    ): UIViewController? {
+        val f = facade(Graine.DEFAULT_AGENT)
+        if (!f.respondsToSelector(IosEngine.AVATAR_STAGE_VIEW)) return null
+        return f.avatarStageViewControllerWithName(name, role, calls.wire, onChat, onClose) as? UIViewController
+    }
+
     private fun facade(agent: String?): GraineObjC {
         val found = if (agent == null) GraineObjC.current() else GraineObjC.named(Graine.normalise(agent))
         return found ?: throw IllegalStateException(

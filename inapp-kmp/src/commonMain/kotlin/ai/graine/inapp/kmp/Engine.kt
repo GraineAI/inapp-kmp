@@ -156,6 +156,21 @@ internal interface GraineEngine {
     fun avatarObserve(onState: (String) -> Unit): () -> Unit = {}
     /** The platform SDK's own call screen draws the face (its `showsAvatar`). */
     fun avatarSetShownOnCallScreen(on: Boolean) {}
+
+    // The face stage (contract/PUBLIC-STATE.md 9). A platform SDK from before it answers none: the stage stays idle.
+    /** The stage's state as the platform SDK's `{"call","phase",…}` JSON, at once and after every change; returns the stop. */
+    fun stageObserve(onState: (String) -> Unit): () -> Unit = {}
+    fun stageCall() {}
+    fun stageAnswer() {}
+    fun stageEnd() {}
+    fun stageSetMuted(muted: Boolean) {}
+    fun stageSetSpeaker(on: Boolean) {}
+    /** The header's words; null: the dashboard's. */
+    fun stageSetWords(name: String?, role: String?) {}
+    /** "voice" or "native": what the Call button places. */
+    fun stageSetCalls(calls: String) {}
+    /** The app's chat; null: no Chat button. */
+    fun stageSetChat(onChat: (() -> Unit)?) {}
 }
 
 /** Where a platform SDK reports. Any thread. */

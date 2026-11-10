@@ -282,6 +282,26 @@ class AndroidEngineTest {
         override var voiceMicLevel = 0f
         override fun setVoiceCaptionsOn(on: Boolean) { captionsOnNow = on; did += "captionsOn:$on" }
         override fun clearVoiceCaptions() { voiceCaptions = emptyList(); did += "clearCaptions" }
+
+        /** The Android SDK's GraineStage.stateJson, as its own suite pins it (AvatarStageTest). */
+        var stageJson = ANDROID_STAGE_JSON
+        var stageHeard: ((String) -> Unit)? = null
+        var stageStopped = false
+        var stageCallFrom: Activity? = null
+        var stageChat: (() -> Unit)? = null
+        override fun observeStage(onState: (String) -> Unit): () -> Unit {
+            stageHeard = onState
+            onState(stageJson)
+            return { stageStopped = true; stageHeard = null }
+        }
+        override fun stageCall(activity: Activity?) { stageCallFrom = activity; did += "stageCall" }
+        override fun stageAnswer() { did += "stageAnswer" }
+        override fun stageEnd() { did += "stageEnd" }
+        override fun stageSetMuted(muted: Boolean) { did += "stageMuted:$muted" }
+        override fun stageSetSpeaker(on: Boolean) { did += "stageSpeaker:$on" }
+        override fun stageSetWords(name: String?, role: String?) { did += "stageWords:$name|$role" }
+        override fun stageSetCalls(native: Boolean) { did += "stageCalls:$native" }
+        override fun stageSetChat(onChat: (() -> Unit)?) { stageChat = onChat; did += "stageChat:${onChat != null}" }
     }
 
     private lateinit var port: Port
@@ -1633,7 +1653,76 @@ class AndroidEngineTest {
             assertEquals("Graine refused it.", e.message)
         }
     }
+
+    /**
+     * The face stage on Android (contract/PUBLIC-STATE.md 9): Graine.stage is the
+     * Android SDK's GraineInApp.stage — its JSON, byte for byte as that SDK writes
+     * it, read as GraineStageState; the settings and the buttons reach it on the
+     * main thread, the Call button from the activity in front.
+     */
+    @Test
+    fun throughTheSharedApiTheFaceStageIsTheAndroidSdksStage() {
+        Graine.reset()
+        try {
+            Graine.stage.name = "Asha"
+            Graine.stage.calls = GraineStageCalls.NATIVE
+            Graine.install(engine)
+            assertEquals("told as the engine is made", listOf("stageWords:Asha|null", "stageCalls:true", "stageChat:false"), port.did.filter { it.startsWith("stage") })
+            val s = Graine.stage.state.value
+            assertEquals(GraineStageCall.VOICE, s.call)
+            assertEquals(GraineStagePhase.LIVE, s.phase)
+            assertTrue(s.live)
+            assertEquals(1762430400000L, s.startedAt)
+            assertEquals(GraineStageCaption(GraineRole.USER, "Tomorrow \"works\"", true), s.caption)
+            assertEquals(listOf(GraineStageControl.MUTE, GraineStageControl.END, GraineStageControl.SPEAKER), s.controls)
+            assertTrue(s.canUse(GraineStageControl.END))
+            assertEquals("End", s.endLabel)
+            assertEquals(GraineAvatarState(GraineAvatarState.Phase.LIVE), s.face)
+            assertEquals("Asha", s.name)
+            assertNull(s.role)
+            assertNull(s.componentId)
+            assertTrue(s.componentPending)
+            assertEquals("0:42", s.clock(1762430400000L + 42_000))
+
+            // Every change is heard.
+            port.stageHeard!!(ANDROID_STAGE_JSON.replace("\"phase\":\"live\",\"role\"", "\"phase\":\"reconnecting\",\"role\"").replace("\"live\":true", "\"live\":false"))
+            assertEquals(GraineStagePhase.RECONNECTING, Graine.stage.state.value.phase)
+
+            port.did.clear()
+            val activity = Activity()
+            front = activity
+            Graine.stage.call()
+            assertTrue("placed from the activity in front", port.stageCallFrom === activity)
+            Graine.stage.answer()
+            Graine.stage.setMuted(true)
+            Graine.stage.setSpeaker(false)
+            Graine.stage.end()
+            Graine.stage.role = "AI care assistant"
+            Graine.stage.calls = GraineStageCalls.VOICE
+            var chats = 0
+            Graine.stage.onChat = { chats++ }
+            port.stageChat!!()
+            assertEquals("the Chat button is the app's chat", 1, chats)
+            assertEquals(
+                listOf(
+                    "stageCall", "stageAnswer", "stageMuted:true", "stageSpeaker:false", "stageEnd",
+                    "stageWords:Asha|AI care assistant", "stageCalls:false", "stageChat:true",
+                ),
+                port.did,
+            )
+        } finally {
+            Graine.reset()
+        }
+        assertTrue("reset stops hearing the Android SDK's stage", port.stageStopped)
+    }
 }
 
 /** An app's own call screen, as an app declares one. */
 class OwnCallScreen : Activity()
+
+/** The Android SDK's stage on the wire, byte for byte as its AvatarStageTest pins StageWire.json. */
+internal const val ANDROID_STAGE_JSON =
+    """{"call":"voice","caption":{"final":true,"text":"Tomorrow \"works\"","who":"customer"},"componentId":null,""" +
+        """"componentPending":true,"controls":["mute","end","speaker"],"enabled":["mute","end","speaker"],"endLabel":"End",""" +
+        """"face":{"phase":"live","reason":null},"live":true,"muted":false,"name":"Asha","phase":"live","role":null,""" +
+        """"speaker":true,"startedAt":1762430400000,"status":""}"""

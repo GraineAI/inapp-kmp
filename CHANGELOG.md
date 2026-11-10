@@ -1,3 +1,16 @@
+## 0.15.4
+
+- **The call over the agent's face.** `GraineAvatarStage()` (in `ai.graine:inapp-kmp-compose`): the agent's face edge
+  to edge with the call drawn over it — name and role, LIVE and the call's duration, the line being said, the component
+  the agent drew, and Call, Mute, Chat, End (Cancel, Decline) and Speaker; `onChat` and `onClose` for your navigation.
+  On iOS, `GraineViews.avatarStage()` for UIKit.
+- **All of it is public state:** `Graine.stage` (`GraineStage`, `GraineStageState`, `GraineStageCall`, `GraineStagePhase`,
+  `GraineStageControl`, `GraineStageCalls`, `GraineStageCaption`) with the stage's actions — for a screen of your own
+  over `GraineAvatarFace()`, which now draws the face inside itself on both platforms, so anything composed above it is
+  drawn over the face.
+- Builds on the platforms' 0.15.4: link `GraineInApp` and `GraineInAppRTC` 0.15.4 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.15.4. With an older iOS SDK the stage stays idle and `GraineAvatarStage()` draws the face alone.
+
 ## 0.15.3
 
 - **Booked calls on iPhone have sound when the app was closed, and so does a call placed right after launch** (iOS
