@@ -1,3 +1,14 @@
+## 0.15.3
+
+- **Booked calls on iPhone have sound when the app was closed, and so does a call placed right after launch** (iOS
+  0.15.3). Nothing to change in your code.
+- **A booked call carries your app's variables** on both platforms: `scheduleCall` sends what `setVariables` set, so the
+  agent greets the person by name even when the call is what starts your app.
+- **Android: the brand's ring tone stops when the ring ends, and a booked call can be answered even when Android ended
+  the app while it rang** (Android 0.15.3).
+- Builds on the platforms' 0.15.3: link `GraineInApp` and `GraineInAppRTC` 0.15.3 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.15.3.
+
 ## 0.15.2
 
 - **The agent's face shows on iOS.** `Graine.avatar.state` now follows the face for the whole session: it keeps its
