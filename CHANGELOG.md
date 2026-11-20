@@ -1,3 +1,12 @@
+## 0.15.5
+
+- **The agent's greeting no longer waits out its hold when the call's control connection reconnects** (iOS and Android
+  0.15.5). Nothing to change in your code.
+- **An app on its own Graine install never falls back to Graine's own socket host** (iOS and Android 0.15.5): the
+  multiplatform SDK hands your `baseUrl` to both as given.
+- Builds on the platforms' 0.15.5: link `GraineInApp` and `GraineInAppRTC` 0.15.5 in your iOS app; the Android side builds
+  on `ai.graine:inapp-android` 0.15.5.
+
 ## 0.15.4
 
 - **The call over the agent's face.** `GraineAvatarStage()` (in `ai.graine:inapp-kmp-compose`): the agent's face edge
